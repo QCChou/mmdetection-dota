@@ -55,6 +55,7 @@ def parse_args():
         choices=['proposal', 'proposal_fast', 'bbox', 'segm', 'keypoints'],
         help='eval types')
     parser.add_argument('--show', action='store_true', help='show results')
+    parser.add_argument('--test', action='store_true', help='use test set')
     args = parser.parse_args()
     return args
 
@@ -72,7 +73,8 @@ def main():
     cfg.model.pretrained = None
     cfg.data.test.test_mode = True
 
-    dataset = obj_from_dict(cfg.data.test, datasets, dict(test_mode=True))
+    dataset = cfg.data.test if args.test else cfg.data.val
+    dataset = obj_from_dict(dataset, datasets, dict(test_mode=True))
     if args.gpus == 1:
         model = build_detector(
             cfg.model, train_cfg=None, test_cfg=cfg.test_cfg)

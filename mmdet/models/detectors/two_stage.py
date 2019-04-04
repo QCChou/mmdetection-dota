@@ -183,24 +183,22 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
         of imgs[0].
         """
         # recompute feats to save memory
-        proposal_list = self.aug_test_rpn(
-            self.extract_feats(imgs), img_metas, self.test_cfg.rpn)
+        proposal_list = self.aug_test_rpn(self.extract_feats(imgs), img_metas, self.test_cfg.rpn)
         det_bboxes, det_labels = self.aug_test_bboxes(
             self.extract_feats(imgs), img_metas, proposal_list,
-            self.test_cfg.rcnn)
+            self.test_cfg.rcnn
+        )
 
         if rescale:
             _det_bboxes = det_bboxes
         else:
             _det_bboxes = det_bboxes.clone()
             _det_bboxes[:, :4] *= img_metas[0][0]['scale_factor']
-        bbox_results = bbox2result(_det_bboxes, det_labels,
-                                   self.bbox_head.num_classes)
+        bbox_results = bbox2result(_det_bboxes, det_labels, self.bbox_head.num_classes) # list # = class_num
 
         # det_bboxes always keep the original scale
         if self.with_mask:
-            segm_results = self.aug_test_mask(
-                self.extract_feats(imgs), img_metas, det_bboxes, det_labels)
+            segm_results = self.aug_test_mask(self.extract_feats(imgs), img_metas, det_bboxes, det_labels)
             return bbox_results, segm_results
         else:
             return bbox_results

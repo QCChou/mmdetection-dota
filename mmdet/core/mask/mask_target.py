@@ -3,11 +3,9 @@ import numpy as np
 import mmcv
 
 
-def mask_target(pos_proposals_list, pos_assigned_gt_inds_list, gt_masks_list,
-                cfg):
+def mask_target(pos_proposals_list, pos_assigned_gt_inds_list, gt_masks_list, cfg):
     cfg_list = [cfg for _ in range(len(pos_proposals_list))]
-    mask_targets = map(mask_target_single, pos_proposals_list,
-                       pos_assigned_gt_inds_list, gt_masks_list, cfg_list)
+    mask_targets = map(mask_target_single, pos_proposals_list, pos_assigned_gt_inds_list, gt_masks_list, cfg_list)
     mask_targets = torch.cat(list(mask_targets))
     return mask_targets
 

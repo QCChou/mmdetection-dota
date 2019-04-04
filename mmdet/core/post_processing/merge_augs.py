@@ -25,15 +25,14 @@ def merge_aug_proposals(aug_proposals, img_metas, rpn_test_cfg):
         scale_factor = img_info['scale_factor']
         flip = img_info['flip']
         _proposals = proposals.clone()
-        _proposals[:, :4] = bbox_mapping_back(_proposals[:, :4], img_shape,
-                                              scale_factor, flip)
+        _proposals[:, :4] = bbox_mapping_back(_proposals[:, :4], img_shape, scale_factor, flip)
         recovered_proposals.append(_proposals)
     aug_proposals = torch.cat(recovered_proposals, dim=0)
-    merged_proposals, _ = nms(aug_proposals, rpn_test_cfg.nms_thr)
+    merged_proposals, merged_indices = nms(aug_proposals, rpn_test_cfg.nms_thr)
+
     scores = merged_proposals[:, 4]
     _, order = scores.sort(0, descending=True)
-    num = min(rpn_test_cfg.max_num, merged_proposals.shape[0])
-    order = order[:num]
+    order = order[:rpn_test_cfg.max_num]
     merged_proposals = merged_proposals[order, :]
     return merged_proposals
 
@@ -55,13 +54,16 @@ def merge_aug_bboxes(aug_bboxes, aug_scores, img_metas, rcnn_test_cfg):
         img_shape = img_info[0]['img_shape']
         scale_factor = img_info[0]['scale_factor']
         flip = img_info[0]['flip']
-        bboxes = bbox_mapping_back(bboxes, img_shape, scale_factor, flip)
+        tran = img_info[0].get('translation', (0, 0))
+        bboxes = bbox_mapping_back(bboxes, img_shape, scale_factor, flip, tran=tran)
         recovered_bboxes.append(bboxes)
-    bboxes = torch.stack(recovered_bboxes).mean(dim=0)
+    bboxes = torch.cat(recovered_bboxes, dim=0)
+    # bboxes = torch.stack(recovered_bboxes).mean(dim=0)
     if aug_scores is None:
         return bboxes
     else:
-        scores = torch.stack(aug_scores).mean(dim=0)
+        scores = torch.cat(aug_scores, dim=0)
+        # scores = torch.stack(aug_scores).mean(dim=0)
         return bboxes, scores
 
 

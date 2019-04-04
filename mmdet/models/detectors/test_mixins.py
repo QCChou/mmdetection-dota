@@ -11,12 +11,11 @@ class RPNTestMixin(object):
         return proposal_list
 
     def aug_test_rpn(self, feats, img_metas, rpn_test_cfg):
-        imgs_per_gpu = len(img_metas[0])
-        aug_proposals = [[] for _ in range(imgs_per_gpu)]
+        aug_proposals = []
         for x, img_meta in zip(feats, img_metas):
             proposal_list = self.simple_test_rpn(x, img_meta, rpn_test_cfg)
-            for i, proposals in enumerate(proposal_list):
-                aug_proposals[i].append(proposals)
+            aug_proposals.append(proposal_list)
+
         # after merging, proposals will be rescaled to the original image size
         merged_proposals = [
             merge_aug_proposals(proposals, img_meta, rpn_test_cfg)
@@ -35,8 +34,7 @@ class BBoxTestMixin(object):
                            rescale=False):
         """Test only det bboxes without augmentation."""
         rois = bbox2roi(proposals)
-        roi_feats = self.bbox_roi_extractor(
-            x[:len(self.bbox_roi_extractor.featmap_strides)], rois)
+        roi_feats = self.bbox_roi_extractor(x[:len(self.bbox_roi_extractor.featmap_strides)], rois)
         cls_score, bbox_pred = self.bbox_head(roi_feats)
         img_shape = img_meta[0]['img_shape']
         scale_factor = img_meta[0]['scale_factor']
@@ -50,21 +48,19 @@ class BBoxTestMixin(object):
             cfg=rcnn_test_cfg)
         return det_bboxes, det_labels
 
-    def aug_test_bboxes(self, feats, img_metas, proposal_list, rcnn_test_cfg):
+    def aug_test_bboxes(self, feats, img_metas, proposal_lists, rcnn_test_cfg):
         aug_bboxes = []
         aug_scores = []
-        for x, img_meta in zip(feats, img_metas):
+        for x, img_meta, proposal_list in zip(feats, img_metas, proposal_lists):
             # only one image in the batch
             img_shape = img_meta[0]['img_shape']
             scale_factor = img_meta[0]['scale_factor']
             flip = img_meta[0]['flip']
             # TODO more flexible
-            proposals = bbox_mapping(proposal_list[0][:, :4], img_shape,
-                                     scale_factor, flip)
+            proposals = bbox_mapping(proposal_list[:, :4], img_shape, scale_factor, flip)
             rois = bbox2roi([proposals])
             # recompute feature maps to save GPU memory
-            roi_feats = self.bbox_roi_extractor(
-                x[:len(self.bbox_roi_extractor.featmap_strides)], rois)
+            roi_feats = self.bbox_roi_extractor(x[:len(self.bbox_roi_extractor.featmap_strides)], rois)
             cls_score, bbox_pred = self.bbox_head(roi_feats)
             bboxes, scores = self.bbox_head.get_det_bboxes(
                 rois,
@@ -74,14 +70,15 @@ class BBoxTestMixin(object):
                 scale_factor,
                 rescale=False,
                 cfg=None)
+
             aug_bboxes.append(bboxes)
             aug_scores.append(scores)
         # after merging, bboxes will be rescaled to the original image size
-        merged_bboxes, merged_scores = merge_aug_bboxes(
-            aug_bboxes, aug_scores, img_metas, rcnn_test_cfg)
+        merged_bboxes, merged_scores = merge_aug_bboxes(aug_bboxes, aug_scores, img_metas, rcnn_test_cfg)
         det_bboxes, det_labels = multiclass_nms(
             merged_bboxes, merged_scores, rcnn_test_cfg.score_thr,
-            rcnn_test_cfg.nms, rcnn_test_cfg.max_per_img)
+            rcnn_test_cfg.nms, rcnn_test_cfg.max_per_img
+        )
         return det_bboxes, det_labels
 
 

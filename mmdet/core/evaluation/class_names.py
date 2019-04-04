@@ -1,5 +1,7 @@
 import mmcv
 
+from mmdet.datasets.dota_devkit.dota_utils import wordname_16
+
 
 def voc_classes():
     return [
@@ -96,6 +98,8 @@ def get_classes(dataset):
     if mmcv.is_str(dataset):
         if dataset in alias2name:
             labels = eval(alias2name[dataset] + '_classes()')
+        elif dataset == 'dota':
+            labels = wordname_16
         else:
             raise ValueError('Unrecognized dataset: {}'.format(dataset))
     else:

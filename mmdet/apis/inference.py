@@ -80,4 +80,6 @@ def show_result(img, result, dataset='coco', score_thr=0.3, out_file=None):
         labels,
         class_names=class_names,
         score_thr=score_thr,
-        show=out_file is None)
+        out_file=out_file,
+        show=out_file is None
+    )

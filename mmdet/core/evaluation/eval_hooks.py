@@ -18,18 +18,16 @@ from mmdet import datasets
 
 class DistEvalHook(Hook):
 
-    def __init__(self, dataset, interval=1):
+    def __init__(self, dataset, interval=50):
         if isinstance(dataset, Dataset):
             self.dataset = dataset
         elif isinstance(dataset, dict):
-            self.dataset = obj_from_dict(dataset, datasets,
-                                         {'test_mode': True})
+            self.dataset = obj_from_dict(dataset, datasets, {'test_mode': True})
         else:
-            raise TypeError(
-                'dataset must be a Dataset object or a dict, not {}'.format(
-                    type(dataset)))
+            raise TypeError('dataset must be a Dataset object or a dict, not {}'.format(type(dataset)))
         self.interval = interval
         self.lock_dir = None
+        self.is_run = False
 
     def _barrier(self, rank, world_size):
         """Due to some issues with `torch.distributed.barrier()`, we have to
@@ -57,25 +55,32 @@ class DistEvalHook(Hook):
             mmcv.mkdir_or_exist(self.lock_dir)
 
     def after_run(self, runner):
+        if not self.is_run:
+            self.after_train_epoch(runner, force_run=True)
         if runner.rank == 0:
             shutil.rmtree(self.lock_dir)
 
-    def after_train_epoch(self, runner):
-        if not self.every_n_epochs(runner, self.interval):
+    def after_train_epoch(self, runner, force_run=False):
+        if not force_run and not self.every_n_epochs(runner, self.interval):
             return
         runner.model.eval()
         results = [None for _ in range(len(self.dataset))]
         prog_bar = mmcv.ProgressBar(len(self.dataset))
         for idx in range(runner.rank, len(self.dataset), runner.world_size):
             data = self.dataset[idx]
+            img = self.dataset.get_img(idx)
             data_gpu = scatter(
                 collate([data], samples_per_gpu=1),
                 [torch.cuda.current_device()])[0]
 
             # compute output
             with torch.no_grad():
-                result = runner.model(
-                    return_loss=False, rescale=True, **data_gpu)
+                result = runner.model(return_loss=False, rescale=True, **data_gpu)
+
+            from mmdet.apis import show_result
+            # img = mmcv.imresize(img, data)
+            result = [r / data['img_meta'][0].data['gsd_scale_factor'] for r in result]
+            show_result(img, result, dataset='dota', score_thr=0.01, out_file='./debug/result.jpg')
             results[idx] = result
 
             batch_size = runner.world_size
@@ -98,6 +103,7 @@ class DistEvalHook(Hook):
             mmcv.dump(results, tmp_file)
             self._barrier(runner.rank, runner.world_size)
         self._barrier(runner.rank, runner.world_size)
+        self.is_run = True
 
     def evaluate(self):
         raise NotImplementedError
@@ -136,6 +142,29 @@ class DistEvalmAPHook(DistEvalHook):
             scale_ranges=None,
             iou_thr=0.5,
             dataset=ds_name,
+            print_summary=True)
+        runner.log_buffer.output['mAP'] = mean_ap
+        runner.log_buffer.ready = True
+
+
+class DotaDistEvalmAPHook(DistEvalHook):
+
+    def evaluate(self, runner, results):
+        gt_bboxes = []
+        gt_labels = []
+        for i in range(len(self.dataset)):
+            bboxes, labels = self.dataset.get_ann_info(i)
+
+            gt_bboxes.append(bboxes)
+            gt_labels.append(labels)
+
+        mean_ap, eval_results = eval_map(
+            results,
+            gt_bboxes,
+            gt_labels,
+            scale_ranges=None,
+            iou_thr=0.5,
+            dataset='voc07', # 'DOTA-v1.51',
             print_summary=True)
         runner.log_buffer.output['mAP'] = mean_ap
         runner.log_buffer.ready = True

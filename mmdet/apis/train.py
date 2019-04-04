@@ -8,6 +8,7 @@ from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 
 from mmdet.core import (DistOptimizerHook, DistEvalmAPHook,
                         CocoDistEvalRecallHook, CocoDistEvalmAPHook)
+from mmdet.core.evaluation.eval_hooks import DotaDistEvalmAPHook
 from mmdet.datasets import build_dataloader
 from mmdet.models import RPN
 from .env import get_root_logger
@@ -75,8 +76,7 @@ def _dist_train(model, dataset, cfg, validate=False):
                     cfg.log_level)
     # register hooks
     optimizer_config = DistOptimizerHook(**cfg.optimizer_config)
-    runner.register_training_hooks(cfg.lr_config, optimizer_config,
-                                   cfg.checkpoint_config, cfg.log_config)
+    runner.register_training_hooks(cfg.lr_config, optimizer_config, cfg.checkpoint_config, cfg.log_config)
     runner.register_hook(DistSamplerSeedHook())
     # register eval hooks
     if validate:
@@ -84,7 +84,9 @@ def _dist_train(model, dataset, cfg, validate=False):
             # TODO: implement recall hooks for other datasets
             runner.register_hook(CocoDistEvalRecallHook(cfg.data.val))
         else:
-            if cfg.data.val.type == 'CocoDataset':
+            if cfg.data.val.type == 'DotaDataset':
+                runner.register_hook(DotaDistEvalmAPHook(cfg.data.val))
+            elif cfg.data.val.type == 'CocoDataset':
                 runner.register_hook(CocoDistEvalmAPHook(cfg.data.val))
             else:
                 runner.register_hook(DistEvalmAPHook(cfg.data.val))
@@ -113,6 +115,9 @@ def _non_dist_train(model, dataset, cfg, validate=False):
                     cfg.log_level)
     runner.register_training_hooks(cfg.lr_config, cfg.optimizer_config,
                                    cfg.checkpoint_config, cfg.log_config)
+
+    if validate:
+        runner.register_hook(DotaDistEvalmAPHook(cfg.data.val))
 
     if cfg.resume_from:
         runner.resume(cfg.resume_from)

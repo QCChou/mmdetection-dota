@@ -96,10 +96,16 @@ def bbox_mapping(bboxes, img_shape, scale_factor, flip):
     return new_bboxes
 
 
-def bbox_mapping_back(bboxes, img_shape, scale_factor, flip):
+def bbox_mapping_back(bboxes, img_shape, scale_factor, flip, tran=(0, 0)):
     """Map bboxes from testing scale to original image scale"""
     new_bboxes = bbox_flip(bboxes, img_shape) if flip else bboxes
     new_bboxes = new_bboxes / scale_factor
+
+    new_bboxes[:, 0::4] += tran[0]
+    new_bboxes[:, 2::4] += tran[0]
+    new_bboxes[:, 1::4] += tran[1]
+    new_bboxes[:, 3::4] += tran[1]
+
     return new_bboxes
 
 

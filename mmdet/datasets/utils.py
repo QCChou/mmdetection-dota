@@ -79,11 +79,15 @@ def get_dataset(data_cfg):
         return RepeatDataset(
             get_dataset(data_cfg['dataset']), data_cfg['times'])
 
-    if isinstance(data_cfg['ann_file'], (list, tuple)):
-        ann_files = data_cfg['ann_file']
-        num_dset = len(ann_files)
+    if 'ann_file' in data_cfg:
+        if isinstance(data_cfg['ann_file'], (list, tuple)):
+            ann_files = data_cfg['ann_file']
+            num_dset = len(ann_files)
+        else:
+            ann_files = [data_cfg['ann_file']]
+            num_dset = 1
     else:
-        ann_files = [data_cfg['ann_file']]
+        ann_files = ['']
         num_dset = 1
 
     if 'proposal_file' in data_cfg.keys():
@@ -95,10 +99,13 @@ def get_dataset(data_cfg):
         proposal_files = [None] * num_dset
     assert len(proposal_files) == num_dset
 
-    if isinstance(data_cfg['img_prefix'], (list, tuple)):
-        img_prefixes = data_cfg['img_prefix']
+    if 'img_prefix' in data_cfg:
+        if isinstance(data_cfg['img_prefix'], (list, tuple)):
+            img_prefixes = data_cfg['img_prefix']
+        else:
+            img_prefixes = [data_cfg['img_prefix']] * num_dset
     else:
-        img_prefixes = [data_cfg['img_prefix']] * num_dset
+        img_prefixes = ['']
     assert len(img_prefixes) == num_dset
 
     dsets = []
