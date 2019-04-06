@@ -18,7 +18,7 @@ from mmdet import datasets
 
 class DistEvalHook(Hook):
 
-    def __init__(self, dataset, interval=50):
+    def __init__(self, dataset, interval=50, debug_root='./debug/'):
         if isinstance(dataset, Dataset):
             self.dataset = dataset
         elif isinstance(dataset, dict):
@@ -28,6 +28,7 @@ class DistEvalHook(Hook):
         self.interval = interval
         self.lock_dir = None
         self.is_run = False
+        self.debug_root = debug_root
 
     def _barrier(self, rank, world_size):
         """Due to some issues with `torch.distributed.barrier()`, we have to
@@ -69,9 +70,7 @@ class DistEvalHook(Hook):
         for idx in range(runner.rank, len(self.dataset), runner.world_size):
             data = self.dataset[idx]
             img = self.dataset.get_img(idx)
-            data_gpu = scatter(
-                collate([data], samples_per_gpu=1),
-                [torch.cuda.current_device()])[0]
+            data_gpu = scatter(collate([data], samples_per_gpu=1), [torch.cuda.current_device()])[0]
 
             # compute output
             with torch.no_grad():
@@ -79,8 +78,7 @@ class DistEvalHook(Hook):
 
             from mmdet.apis import show_result
             # img = mmcv.imresize(img, data)
-            result = [r / data['img_meta'][0].data['gsd_scale_factor'] for r in result]
-            show_result(img, result, dataset='dota', score_thr=0.01, out_file='./debug/result.jpg')
+            show_result(img, result, dataset='dota', score_thr=0.01, out_file=os.path.join(self.debug_root, 'result%05d.jpg' % idx))
             results[idx] = result
 
             batch_size = runner.world_size
@@ -98,8 +96,7 @@ class DistEvalHook(Hook):
                 os.remove(tmp_file)
             self.evaluate(runner, results)
         else:
-            tmp_file = osp.join(runner.work_dir,
-                                'temp_{}.pkl'.format(runner.rank))
+            tmp_file = osp.join(runner.work_dir,'temp_{}.pkl'.format(runner.rank))
             mmcv.dump(results, tmp_file)
             self._barrier(runner.rank, runner.world_size)
         self._barrier(runner.rank, runner.world_size)
@@ -129,6 +126,7 @@ class DistEvalmAPHook(DistEvalHook):
                 labels = np.concatenate([labels, ann['labels_ignore']])
             gt_bboxes.append(bboxes)
             gt_labels.append(labels)
+
         # If the dataset is VOC2007, then use 11 points mAP evaluation.
         if hasattr(self.dataset, 'year') and self.dataset.year == 2007:
             ds_name = 'voc07'
@@ -164,7 +162,7 @@ class DotaDistEvalmAPHook(DistEvalHook):
             gt_labels,
             scale_ranges=None,
             iou_thr=0.5,
-            dataset='voc07', # 'DOTA-v1.51',
+            dataset=self.dataset.CLASSES,
             print_summary=True)
         runner.log_buffer.output['mAP'] = mean_ap
         runner.log_buffer.ready = True

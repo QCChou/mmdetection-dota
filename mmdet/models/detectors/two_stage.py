@@ -194,6 +194,17 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
         else:
             _det_bboxes = det_bboxes.clone()
             _det_bboxes[:, :4] *= img_metas[0][0]['scale_factor']
+
+        # filter out small boxes
+        valid_idx = _det_bboxes[:, 0] >= 0
+        valid_idx = valid_idx * (_det_bboxes[:, 1] >= 0)
+        valid_idx = valid_idx * (_det_bboxes[:, 0] < img_metas[0][0]['ori_shape'][1] * img_metas[0][0]['gsd_scale_factor'])
+        valid_idx = valid_idx * (_det_bboxes[:, 1] < img_metas[0][0]['ori_shape'][0] * img_metas[0][0]['gsd_scale_factor'])
+        valid_idx = valid_idx * ((_det_bboxes[:, 2] - _det_bboxes[:, 0]) > 2)
+        valid_idx = valid_idx * ((_det_bboxes[:, 3] - _det_bboxes[:, 1]) > 2)
+        _det_bboxes = _det_bboxes[valid_idx, :]
+        det_labels = det_labels[valid_idx]
+
         bbox_results = bbox2result(_det_bboxes, det_labels, self.bbox_head.num_classes) # list # = class_num
 
         # det_bboxes always keep the original scale

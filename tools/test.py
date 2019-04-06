@@ -6,8 +6,8 @@ from mmcv.runner import load_checkpoint, parallel_test, obj_from_dict
 from mmcv.parallel import scatter, collate, MMDataParallel
 
 from mmdet import datasets
-from mmdet.core import results2json, coco_eval
-from mmdet.datasets import build_dataloader
+from mmdet.core import results2json, coco_eval, eval_map
+from mmdet.datasets import build_dataloader, DotaDataset
 from mmdet.models import build_detector, detectors
 
 
@@ -40,11 +40,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description='MMDet test detector')
     parser.add_argument('config', help='test config file path')
     parser.add_argument('checkpoint', help='checkpoint file')
-    parser.add_argument(
-        '--gpus', default=1, type=int, help='GPU number used for testing')
+    parser.add_argument('--gpus', default=4, type=int, help='GPU number used for testing')
     parser.add_argument(
         '--proc_per_gpu',
-        default=1,
+        default=2,
         type=int,
         help='Number of processes per GPU')
     parser.add_argument('--out', help='output result file')
@@ -55,7 +54,7 @@ def parse_args():
         choices=['proposal', 'proposal_fast', 'bbox', 'segm', 'keypoints'],
         help='eval types')
     parser.add_argument('--show', action='store_true', help='show results')
-    parser.add_argument('--test', action='store_true', help='use test set')
+    parser.add_argument('--set', default='cv_valid')
     args = parser.parse_args()
     return args
 
@@ -68,26 +67,33 @@ def main():
 
     cfg = mmcv.Config.fromfile(args.config)
     # set cudnn_benchmark
-    if cfg.get('cudnn_benchmark', False):
-        torch.backends.cudnn.benchmark = True
+    # torch.backends.cudnn.benchmark = True
     cfg.model.pretrained = None
     cfg.data.test.test_mode = True
+    print(args.set, '----')
+    cfg.data['val']['settype'] = args.set
 
-    dataset = cfg.data.test if args.test else cfg.data.val
+    if args.set == 'test':
+        dataset = cfg.data.test
+    else:
+        dataset = cfg.data.val
+        cfg.data['val']['settype'] = args.set
+
     dataset = obj_from_dict(dataset, datasets, dict(test_mode=True))
+    data_loader = build_dataloader(
+        dataset,
+        imgs_per_gpu=1,
+        workers_per_gpu=cfg.data.workers_per_gpu,
+        num_gpus=1,
+        dist=False,
+        shuffle=False)
+
     if args.gpus == 1:
         model = build_detector(
             cfg.model, train_cfg=None, test_cfg=cfg.test_cfg)
         load_checkpoint(model, args.checkpoint)
         model = MMDataParallel(model, device_ids=[0])
 
-        data_loader = build_dataloader(
-            dataset,
-            imgs_per_gpu=1,
-            workers_per_gpu=cfg.data.workers_per_gpu,
-            num_gpus=1,
-            dist=False,
-            shuffle=False)
         outputs = single_test(model, data_loader, args.show)
     else:
         model_args = cfg.model.copy()
@@ -101,6 +107,25 @@ def main():
             _data_func,
             range(args.gpus),
             workers_per_gpu=args.proc_per_gpu)
+
+    if isinstance(dataset, DotaDataset):
+        gt_bboxes = []
+        gt_labels = []
+        for i in range(len(dataset)):
+            bboxes, labels = dataset.get_ann_info(i)
+
+            gt_bboxes.append(bboxes)
+            gt_labels.append(labels)
+
+        mean_ap, eval_results = eval_map(
+            outputs,
+            gt_bboxes,
+            gt_labels,
+            scale_ranges=None,
+            iou_thr=0.5,
+            dataset=dataset.CLASSES,
+            print_summary=True)
+        pass
 
     if args.out:
         print('writing results to {}'.format(args.out))

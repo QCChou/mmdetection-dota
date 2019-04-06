@@ -1,3 +1,4 @@
+import itertools
 import logging
 import os
 import random
@@ -29,7 +30,7 @@ logger.addHandler(ch)
 
 
 _dota_root = '/data/public/rw/team-autolearn/aerial/DOTA/v1.5_hbb_190402/'
-_size = 800
+_size = 1024
 
 
 class DotaPreprocess:
@@ -43,6 +44,7 @@ class DotaDataset(Dataset, DotaPreprocess):
                  size_divisor=32, test_mode=False, **kwargs):
         super(DotaDataset, self).__init__(target_gsd)
         print(kwargs.keys())
+        self.CLASSES = wordname_16
 
         self.settype = settype
         self.test_mode = test_mode
@@ -95,7 +97,7 @@ class DotaDataset(Dataset, DotaPreprocess):
         self.numpy2tensor = Numpy2Tensor()
 
         # gsd normalization
-        self.gsd_aug = GSDNormalizedCrop(crop_size=(_size, _size) if not self.test_mode else None)  # TODO : parameters
+        self.gsd_aug = GSDNormalizedCrop(crop_size=(_size, _size), random_crop=(not self.test_mode))  # TODO : parameters
 
         # if use extra augmentation
         if extra_aug is not None:
@@ -136,10 +138,6 @@ class DotaDataset(Dataset, DotaPreprocess):
         gsd = self.dota.gsd(imgid)
         gt_bboxes, gt_labels = self.get_ann_info(index)
 
-        # skip the image if there is no valid gt bbox
-        # if len(gt_bboxes) == 0:
-        #     return None
-
         # gsd normalization & random crop
         if self.gsd_aug:
             img, gt_bboxes, gt_labels, gsd_scale = self.gsd_aug(img, gt_bboxes, gt_labels, gsd)
@@ -153,13 +151,14 @@ class DotaDataset(Dataset, DotaPreprocess):
 
             # apply transforms
             flip = True if np.random.rand() < self.flip_ratio else False
+            flip_v = True if np.random.rand() < self.flip_ratio else False
 
             # randomly sample a scale
             img_scale = random_scale(self.img_scales, self.multiscale_mode)
-            img, img_shape, pad_shape, scale_factor = self.img_transform(img, img_scale, flip, keep_ratio=self.resize_keep_ratio)
+            img, img_shape, pad_shape, scale_factor = self.img_transform(img, img_scale, flip, flip_v, keep_ratio=self.resize_keep_ratio)
             img = img.copy()
 
-            gt_bboxes = self.bbox_transform(gt_bboxes, img_shape, scale_factor, flip)
+            gt_bboxes = self.bbox_transform(gt_bboxes, img_shape, scale_factor, flip, flip_v)
 
             img_meta = dict(
                 imgid=imgid,
@@ -174,7 +173,8 @@ class DotaDataset(Dataset, DotaPreprocess):
                 img=DC(to_tensor(img), stack=True),
                 img_meta=DC(img_meta, cpu_only=True),
                 gt_bboxes=DC(to_tensor(gt_bboxes)),
-                gt_labels=DC(to_tensor(gt_labels))
+                gt_labels=DC(to_tensor(gt_labels)),
+                gt_bboxes_ignore=DC(to_tensor([]))
             )
 
             return data
@@ -187,7 +187,7 @@ class DotaDataset(Dataset, DotaPreprocess):
             for window in windows:
                 _img_w = img[window.indices()]
 
-                for flip_h in [False]:
+                for flip_h in [False, True]:
                     _img, _img_shape, _pad_shape, _scale_factor = self.img_transform(_img_w, self.img_scales[0], flip_h, keep_ratio=self.resize_keep_ratio)
                     _gt_bboxes = self.bbox_transform(gt_bboxes, _img_shape, _scale_factor, flip_h)
 
@@ -222,32 +222,37 @@ class DotaTestDataset(Dataset):
 
 class GSDNormalizedCrop(object):
 
-    def __init__(self, crop_size=(800, 800), min_iou=0.3, target_gsd=0.25):
+    def __init__(self, crop_size=(_size, _size), random_crop=True, min_iou=0.3, target_gsd=0.25):
         self.crop_size = crop_size
         self.min_iou = [min_iou] * 9 + [0]
         self.target_gsd = target_gsd
+        self.random_crop = random_crop
 
     def __call__(self, img, boxes, labels, gsd):
         # resize (gsd normalization)
-        scale = self.target_gsd / gsd
+        target_gsd = self.target_gsd
+        if isinstance(self.target_gsd, (list, tuple)):
+            target_gsd = random.choice(self.target_gsd)
+        scale = target_gsd / gsd
         img = mmcv.imrescale(img, scale)
         boxes = (boxes.astype(np.float64) * scale + 0.5).astype(np.int64)
 
-        if not self.crop_size:
+        # add padding if short
+        new_w, new_h = self.crop_size
+        img_padded = np.zeros((max(new_h, img.shape[0]), max(new_w, img.shape[1]), 3), dtype=img.dtype)
+        img_padded[:img.shape[0], :img.shape[1], :] = img
+        img = img_padded
+
+        if not self.random_crop:
             return img, boxes, labels, scale
 
         # random crop
         h, w, c = img.shape
-        new_w, new_h = self.crop_size
         not_cropped = True
         while not_cropped:
             min_iou = random.choice(self.min_iou)
 
             for i in range(50):
-                # h / w in [0.5, 2]
-                if new_h / new_w < 0.5 or new_h / new_w > 2:
-                    continue
-
                 left = random.uniform(0, w - new_w)
                 top = random.uniform(0, h - new_h)
 

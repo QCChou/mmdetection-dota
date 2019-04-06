@@ -66,8 +66,14 @@ train_cfg = dict(
             neg_iou_thr=0.5,
             min_pos_iou=0.5,
             ignore_iof_thr=-1),
+        # sampler=dict(
+        #     type='RandomSampler',
+        #     num=512,
+        #     pos_fraction=0.25,
+        #     neg_pos_ub=-1,
+        #     add_gt_as_proposals=True),
         sampler=dict(
-            type='RandomSampler',
+            type='OHEMSampler',
             num=512,
             pos_fraction=0.25,
             neg_pos_ub=-1,
@@ -85,7 +91,7 @@ test_cfg = dict(
     rcnn=dict(
         score_thr=0.2,
         nms=dict(type='nms', iou_thr=(
-            0.2, 0.2, 0.3, 0.2, 0.5,
+            0.3, 0.2, 0.3, 0.2, 0.5,
             0.5, 0.3, 0.3, 0.3, 0.3,
             0.2, 0.3, 0.2, 0.3, 0.3, 0.3
         )),

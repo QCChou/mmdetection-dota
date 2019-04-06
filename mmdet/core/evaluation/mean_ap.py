@@ -261,8 +261,7 @@ def eval_map(det_results,
         cls_dets, cls_gts, cls_gt_ignore = get_cls_results(
             det_results, gt_bboxes, gt_labels, gt_ignore, i)
         # calculate tp and fp for each image
-        tpfp_func = (tpfp_imagenet
-                     if dataset in ['det', 'vid'] else tpfp_default)
+        tpfp_func = (tpfp_imagenet if dataset in ['det', 'vid'] else tpfp_default)
         tpfp = [
             tpfp_func(cls_dets[j], cls_gts[j], cls_gt_ignore[j], iou_thr,
                       area_ranges) for j in range(len(cls_dets))
@@ -298,7 +297,9 @@ def eval_map(det_results,
             recalls = recalls[0, :]
             precisions = precisions[0, :]
             num_gts = num_gts.item()
-        mode = 'area' if dataset != 'voc07' else '11points'
+        mode = 'area'
+        if dataset in ['voc07', 'dota'] or isinstance(dataset, (list, tuple)):
+            mode = '11points'
         ap = average_precision(recalls, precisions, mode)
         eval_results.append({
             'num_gts': num_gts,
@@ -325,6 +326,8 @@ def eval_map(det_results,
         mean_ap = np.array(aps).mean().item() if aps else 0.0
     if print_summary:
         print_map_summary(mean_ap, eval_results, dataset)
+        for r in eval_results:
+            print('%.4f\t%.4f\t%.4f' % (r['recall'].mean(), r['precision'].mean(), r['ap'].mean()))
 
     return mean_ap, eval_results
 

@@ -25,7 +25,7 @@ class ImageTransform(object):
         self.to_rgb = to_rgb
         self.size_divisor = size_divisor
 
-    def __call__(self, img, scale, flip=False, keep_ratio=True):
+    def __call__(self, img, scale, flip=False, flip_v=False, keep_ratio=True):
         if keep_ratio:
             img, scale_factor = mmcv.imrescale(img, scale, return_scale=True)
         else:
@@ -37,6 +37,8 @@ class ImageTransform(object):
         img = mmcv.imnormalize(img, self.mean, self.std, self.to_rgb)
         if flip:
             img = mmcv.imflip(img)
+        if flip_v:
+            img = mmcv.imflip(img, 'vertical')
         if self.size_divisor is not None:
             img = mmcv.impad_to_multiple(img, self.size_divisor)
             pad_shape = img.shape
@@ -61,6 +63,21 @@ def bbox_flip(bboxes, img_shape):
     return flipped
 
 
+def bbox_flip_v(bboxes, img_shape):
+    """Flip bboxes vertically.
+
+    Args:
+        bboxes(ndarray): shape (..., 4*k)
+        img_shape(tuple): (height, width)
+    """
+    assert bboxes.shape[-1] % 4 == 0
+    h = img_shape[0]
+    flipped = bboxes.copy()
+    flipped[..., 1::4] = h - bboxes[..., 3::4] - 1
+    flipped[..., 3::4] = h - bboxes[..., 1::4] - 1
+    return flipped
+
+
 class BboxTransform(object):
     """Preprocess gt bboxes.
 
@@ -72,13 +89,16 @@ class BboxTransform(object):
     def __init__(self, max_num_gts=None):
         self.max_num_gts = max_num_gts
 
-    def __call__(self, bboxes, img_shape, scale_factor, flip=False):
+    def __call__(self, bboxes, img_shape, scale_factor, flip=False, flip_v=False):
         if len(bboxes) == 0:
             return bboxes.astype(np.float32)
 
         gt_bboxes = bboxes * scale_factor
         if flip:
             gt_bboxes = bbox_flip(gt_bboxes, img_shape)
+        if flip_v:
+            gt_bboxes = bbox_flip_v(gt_bboxes, img_shape)
+
         gt_bboxes[:, 0::2] = np.clip(gt_bboxes[:, 0::2], 0, img_shape[1] - 1)
         gt_bboxes[:, 1::2] = np.clip(gt_bboxes[:, 1::2], 0, img_shape[0] - 1)
         if self.max_num_gts is None:

@@ -3,10 +3,12 @@ from abc import ABCMeta, abstractmethod
 
 import mmcv
 import numpy as np
+import torch
 import torch.nn as nn
 import pycocotools.mask as maskUtils
 
-from mmdet.core import tensor2imgs, get_classes
+from mmdet.core import tensor2imgs, get_classes, bbox2result, multiclass_nms, bbox_mapping_back
+from mmdet.ops import nms
 
 
 class BaseDetector(nn.Module):
@@ -46,9 +48,66 @@ class BaseDetector(nn.Module):
     def simple_test(self, img, img_meta, **kwargs):
         pass
 
-    @abstractmethod
     def aug_test(self, imgs, img_metas, **kwargs):
-        pass
+        proposals = kwargs.get('proposals', None)
+        l1 = []
+        l2 = []
+        for img, img_meta in zip(imgs, img_metas):
+            det_bboxes, det_scores, _, _ = self._simple_test(img, img_meta, proposals, True, return_lb=False)
+            if det_bboxes.shape[0] == 0:
+                continue
+            assert det_bboxes.shape[1] == 4
+            assert det_scores.max() <= 1.0
+
+            img_shape = img_meta[0]['img_shape']
+            scale_factor = img_meta[0]['scale_factor']
+            flip = img_meta[0]['flip']
+            tran = img_meta[0].get('translation', (0, 0))
+            det_bboxes = bbox_mapping_back(det_bboxes, img_shape, scale_factor, flip, tran=tran)
+            assert det_bboxes.shape[1] == 4
+            gsd_scale_factor = img_meta[0]['gsd_scale_factor']
+            det_bboxes[:, :4] = det_bboxes[:, :4] / gsd_scale_factor
+
+            l1.append(det_bboxes)
+            l2.append(det_scores)
+        merged_bboxes = torch.cat(l1, dim=0)
+        merged_scores = torch.cat(l2, dim=0)
+        assert merged_scores.max() <= 1.
+
+        det_bboxes, det_labels = multiclass_nms(
+            merged_bboxes, merged_scores, self.test_cfg.rcnn.score_thr,
+            self.test_cfg.rcnn.nms, self.test_cfg.rcnn.max_per_img
+        )
+
+        # threshold
+        inds = det_bboxes[:, -1] > self.test_cfg.rcnn.score_thr
+        det_bboxes = det_bboxes[inds, :]
+        det_labels = det_labels[inds]
+
+        # nms cross classes
+        det_bboxes, inds = nms(det_bboxes, 0.7)  # TODO
+        det_labels = det_labels[inds]
+
+        assert det_bboxes[:, 4].max() <= 1.
+
+        # filter out small boxes
+        valid_idx = det_bboxes[:, 0] >= 0
+        valid_idx = valid_idx * (det_bboxes[:, 1] >= 0)
+        valid_idx = valid_idx * (det_bboxes[:, 0] < img_metas[0][0]['ori_shape'][1] * img_metas[0][0]['gsd_scale_factor'])
+        valid_idx = valid_idx * (det_bboxes[:, 1] < img_metas[0][0]['ori_shape'][0] * img_metas[0][0]['gsd_scale_factor'])
+        valid_idx = valid_idx * ((det_bboxes[:, 2] - det_bboxes[:, 0]) > 2)
+        valid_idx = valid_idx * ((det_bboxes[:, 3] - det_bboxes[:, 1]) > 2)
+        _det_bboxes = det_bboxes[valid_idx, :]
+        det_labels = det_labels[valid_idx]
+
+        bbox_results = bbox2result(_det_bboxes, det_labels, self.bbox_head[0].num_classes)  # list # = class_num
+
+        # det_bboxes always keep the original scale
+        if self.with_mask:
+            segm_results = self.aug_test_mask(self.extract_feats(imgs), img_metas, det_bboxes, det_labels)
+            return bbox_results, segm_results
+        else:
+            return bbox_results
 
     def init_weights(self, pretrained=None):
         if pretrained is not None:
@@ -70,10 +129,10 @@ class BaseDetector(nn.Module):
         imgs_per_gpu = imgs[0].size(0)
         assert imgs_per_gpu == 1
 
-        if num_augs == 1:
-            return self.simple_test(imgs[0], img_metas[0], **kwargs)
-        else:
-            return self.aug_test(imgs, img_metas, **kwargs)
+        # if num_augs == 1:
+        #     return self.simple_test(imgs[0], img_metas[0], **kwargs)
+        # else:
+        return self.aug_test(imgs, img_metas, **kwargs)
 
     def forward(self, img, img_meta, return_loss=True, **kwargs):
         if return_loss:

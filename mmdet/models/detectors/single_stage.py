@@ -65,6 +65,3 @@ class SingleStageDetector(BaseDetector):
             for det_bboxes, det_labels in bbox_list
         ]
         return bbox_results[0]
-
-    def aug_test(self, imgs, img_metas, rescale=False):
-        raise NotImplementedError

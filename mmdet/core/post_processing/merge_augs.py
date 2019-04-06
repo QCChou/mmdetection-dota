@@ -55,7 +55,9 @@ def merge_aug_bboxes(aug_bboxes, aug_scores, img_metas, rcnn_test_cfg):
         scale_factor = img_info[0]['scale_factor']
         flip = img_info[0]['flip']
         tran = img_info[0].get('translation', (0, 0))
+        gsd_scale_factor = img_info[0]['gsd_scale_factor']
         bboxes = bbox_mapping_back(bboxes, img_shape, scale_factor, flip, tran=tran)
+        bboxes = bboxes / gsd_scale_factor
         recovered_bboxes.append(bboxes)
     bboxes = torch.cat(recovered_bboxes, dim=0)
     # bboxes = torch.stack(recovered_bboxes).mean(dim=0)

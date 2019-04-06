@@ -24,11 +24,10 @@ def nms(dets, iou_thr, device_id=None):
     if dets_np.shape[0] == 0:
         inds = []
     else:
-        inds = (gpu_nms(dets_np, iou_thr, device_id=device_id)
-                if device_id is not None else cpu_nms(dets_np, iou_thr))
+        inds = (gpu_nms(dets_np, iou_thr, device_id=device_id) if device_id is not None else cpu_nms(dets_np, iou_thr))
 
     if is_tensor:
-        inds = dets.new_tensor(inds, dtype=torch.long)
+        inds = torch.tensor(inds, dtype=torch.long, device=device_id, requires_grad=False)
     else:
         inds = np.array(inds, dtype=np.int64)
     return dets[inds, :], inds
@@ -42,9 +41,7 @@ def soft_nms(dets, iou_thr, method='linear', sigma=0.5, min_score=1e-3):
         is_tensor = False
         dets_np = dets
     else:
-        raise TypeError(
-            'dets must be either a Tensor or numpy array, but got {}'.format(
-                type(dets)))
+        raise TypeError('dets must be either a Tensor or numpy array, but got {}'.format(type(dets)))
 
     method_codes = {'linear': 1, 'gaussian': 2}
     if method not in method_codes:
@@ -57,7 +54,6 @@ def soft_nms(dets, iou_thr, method='linear', sigma=0.5, min_score=1e-3):
         min_score=min_score)
 
     if is_tensor:
-        return dets.new_tensor(new_dets), dets.new_tensor(
-            inds, dtype=torch.long)
+        return dets.new_tensor(new_dets), dets.new_tensor(inds, dtype=torch.long)
     else:
         return new_dets.astype(np.float32), inds.astype(np.int64)

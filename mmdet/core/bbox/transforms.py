@@ -101,6 +101,8 @@ def bbox_mapping_back(bboxes, img_shape, scale_factor, flip, tran=(0, 0)):
     new_bboxes = bbox_flip(bboxes, img_shape) if flip else bboxes
     new_bboxes = new_bboxes / scale_factor
 
+    assert new_bboxes.shape[1] % 4 == 0
+
     new_bboxes[:, 0::4] += tran[0]
     new_bboxes[:, 2::4] += tran[0]
     new_bboxes[:, 1::4] += tran[1]

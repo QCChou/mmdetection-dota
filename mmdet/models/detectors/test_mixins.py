@@ -1,5 +1,8 @@
+from torch.nn import ModuleList
+
 from mmdet.core import (bbox2roi, bbox_mapping, merge_aug_proposals,
                         merge_aug_bboxes, merge_aug_masks, multiclass_nms)
+from mmdet.ops import nms
 
 
 class RPNTestMixin(object):
@@ -60,7 +63,11 @@ class BBoxTestMixin(object):
             proposals = bbox_mapping(proposal_list[:, :4], img_shape, scale_factor, flip)
             rois = bbox2roi([proposals])
             # recompute feature maps to save GPU memory
-            roi_feats = self.bbox_roi_extractor(x[:len(self.bbox_roi_extractor.featmap_strides)], rois)
+            if isinstance(self.bbox_roi_extractor, ModuleList):
+                featmap_strides = self.bbox_roi_extractor[0].featmap_strides
+            else:
+                featmap_strides = self.bbox_roi_extractor.featmap_strides
+            roi_feats = self.bbox_roi_extractor(x[:len(featmap_strides)], rois)
             cls_score, bbox_pred = self.bbox_head(roi_feats)
             bboxes, scores = self.bbox_head.get_det_bboxes(
                 rois,
@@ -73,12 +80,24 @@ class BBoxTestMixin(object):
 
             aug_bboxes.append(bboxes)
             aug_scores.append(scores)
+
         # after merging, bboxes will be rescaled to the original image size
         merged_bboxes, merged_scores = merge_aug_bboxes(aug_bboxes, aug_scores, img_metas, rcnn_test_cfg)
+
         det_bboxes, det_labels = multiclass_nms(
             merged_bboxes, merged_scores, rcnn_test_cfg.score_thr,
             rcnn_test_cfg.nms, rcnn_test_cfg.max_per_img
         )
+
+        # threshold
+        inds = det_bboxes[:, -1] > rcnn_test_cfg.score_thr
+        det_bboxes = det_bboxes[inds, :]
+        det_labels = det_labels[inds]
+
+        # nms across classes
+        det_bboxes, inds = nms(det_bboxes, 0.7)
+        det_labels = det_labels[inds]
+
         return det_bboxes, det_labels
 
 

@@ -1,6 +1,8 @@
 from __future__ import division
 
 import argparse
+import os
+
 from mmcv import Config
 
 from mmdet import __version__
@@ -23,7 +25,7 @@ def parse_args():
     parser.add_argument(
         '--gpus',
         type=int,
-        default=1,
+        default=4,
         help='number of gpus to use (only applicable to non-distributed training)')
     parser.add_argument('--seed', type=int, default=1958, help='random seed')
     parser.add_argument(
@@ -32,7 +34,12 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    parser.add_argument('--epoch', type=int, default=-1)
+    parser.add_argument('--lr', type=float, default=-1)
     args = parser.parse_args()
+
+    if args.resume_from and '/' not in args.resume_from:
+        args.resume_from = os.path.join(args.work_dir, args.resume_from)
 
     return args
 
@@ -42,8 +49,8 @@ def main():
 
     cfg = Config.fromfile(args.config)
     # set cudnn_benchmark
-    if cfg.get('cudnn_benchmark', False):
-        torch.backends.cudnn.benchmark = True
+    # torch.backends.cudnn.benchmark = True
+
     # update configs according to CLI args
     if args.work_dir is not None:
         cfg.work_dir = args.work_dir
@@ -52,8 +59,7 @@ def main():
     cfg.gpus = args.gpus
     if cfg.checkpoint_config is not None:
         # save mmdet version in checkpoints as meta data
-        cfg.checkpoint_config.meta = dict(
-            mmdet_version=__version__, config=cfg.text)
+        cfg.checkpoint_config.meta = dict(mmdet_version=__version__, config=cfg.text)
 
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':
@@ -61,6 +67,11 @@ def main():
     else:
         distributed = True
         init_dist(args.launcher, **cfg.dist_params)
+
+    if args.epoch > 0:
+        cfg.total_epochs = args.epoch
+    if args.lr > 0:
+        cfg.optimizer['lr'] = args.lr
 
     # init logger before other steps
     logger = get_root_logger(cfg.log_level)

@@ -3,16 +3,17 @@ from __future__ import division
 import torch
 import torch.nn as nn
 
+from mmdet.ops import nms
 from .base import BaseDetector
-from .test_mixins import RPNTestMixin
+from .test_mixins import RPNTestMixin, BBoxTestMixin
 from .. import builder
 from ..registry import DETECTORS
 from mmdet.core import (assign_and_sample, bbox2roi, bbox2result, multi_apply,
-                        merge_aug_masks)
+                        merge_aug_masks, bbox_mapping_back, multiclass_nms)
 
 
 @DETECTORS.register_module
-class CascadeRCNN(BaseDetector, RPNTestMixin):
+class CascadeRCNN(BaseDetector, RPNTestMixin, BBoxTestMixin):
 
     def __init__(self,
                  num_stages,
@@ -188,10 +189,9 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
 
         return losses
 
-    def simple_test(self, img, img_meta, proposals=None, rescale=False):
+    def _simple_test(self, img, img_meta, proposals=None, rescale=False, return_lb=True):
         x = self.extract_feat(img)
-        proposal_list = self.simple_test_rpn(
-            x, img_meta, self.test_cfg.rpn) if proposals is None else proposals
+        proposal_list = self.simple_test_rpn(x, img_meta, self.test_cfg.rpn) if proposals is None else proposals
 
         img_shape = img_meta[0]['img_shape']
         ori_shape = img_meta[0]['ori_shape']
@@ -201,15 +201,14 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
         ms_bbox_result = {}
         ms_segm_result = {}
         ms_scores = []
-        rcnn_test_cfg = self.test_cfg.rcnn
+        rcnn_test_cfg = self.test_cfg.rcnn if return_lb else None
 
         rois = bbox2roi(proposal_list)
         for i in range(self.num_stages):
             bbox_roi_extractor = self.bbox_roi_extractor[i]
             bbox_head = self.bbox_head[i]
 
-            bbox_feats = bbox_roi_extractor(
-                x[:len(bbox_roi_extractor.featmap_strides)], rois)
+            bbox_feats = bbox_roi_extractor(x[:len(bbox_roi_extractor.featmap_strides)], rois)
             cls_score, bbox_pred = bbox_head(bbox_feats)
             ms_scores.append(cls_score)
 
@@ -260,8 +259,15 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
             scale_factor,
             rescale=rescale,
             cfg=rcnn_test_cfg)
-        bbox_result = bbox2result(det_bboxes, det_labels,
-                                  self.bbox_head[-1].num_classes)
+        return det_bboxes, det_labels, ms_bbox_result, ms_segm_result
+
+    def simple_test(self, img, img_meta, proposals=None, rescale=False):
+        ori_shape = img_meta[0]['ori_shape']
+        scale_factor = img_meta[0]['scale_factor']
+        rcnn_test_cfg = self.test_cfg.rcnn
+
+        det_bboxes, det_labels, ms_bbox_result, ms_segm_result = self._simple_test(img, img_meta, proposals=None, rescale=False)
+        bbox_result = bbox2result(det_bboxes, det_labels, self.bbox_head[-1].num_classes)
         ms_bbox_result['ensemble'] = bbox_result
 
         if self.with_mask:
@@ -270,14 +276,12 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
                     [] for _ in range(self.mask_head[-1].num_classes - 1)
                 ]
             else:
-                _bboxes = (det_bboxes[:, :4] * scale_factor
-                           if rescale else det_bboxes)
+                _bboxes = (det_bboxes[:, :4] * scale_factor if rescale else det_bboxes)
                 mask_rois = bbox2roi([_bboxes])
                 aug_masks = []
                 for i in range(self.num_stages):
                     mask_roi_extractor = self.mask_roi_extractor[i]
-                    mask_feats = mask_roi_extractor(
-                        x[:len(mask_roi_extractor.featmap_strides)], mask_rois)
+                    mask_feats = mask_roi_extractor(x[:len(mask_roi_extractor.featmap_strides)], mask_rois)
                     mask_pred = self.mask_head[i](mask_feats)
                     aug_masks.append(mask_pred.sigmoid().cpu().numpy())
                 merged_masks = merge_aug_masks(aug_masks,
@@ -290,8 +294,7 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
 
         if not self.test_cfg.keep_all_stages:
             if self.with_mask:
-                results = (ms_bbox_result['ensemble'],
-                           ms_segm_result['ensemble'])
+                results = (ms_bbox_result['ensemble'], ms_segm_result['ensemble'])
             else:
                 results = ms_bbox_result['ensemble']
         else:
@@ -304,9 +307,6 @@ class CascadeRCNN(BaseDetector, RPNTestMixin):
                 results = ms_bbox_result
 
         return results
-
-    def aug_test(self, img, img_meta, proposals=None, rescale=False):
-        raise NotImplementedError
 
     def show_result(self, data, result, img_norm_cfg, **kwargs):
         if self.with_mask:
