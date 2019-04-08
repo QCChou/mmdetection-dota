@@ -190,6 +190,11 @@ class CascadeRCNN(BaseDetector, RPNTestMixin, BBoxTestMixin):
         return losses
 
     def _simple_test(self, img, img_meta, proposals=None, rescale=False, return_lb=True):
+        if not img.is_cuda:
+            img = img.cuda(torch.cuda.current_device())
+            created = True
+        else:
+            created = False
         x = self.extract_feat(img)
         proposal_list = self.simple_test_rpn(x, img_meta, self.test_cfg.rpn) if proposals is None else proposals
 
@@ -221,8 +226,7 @@ class CascadeRCNN(BaseDetector, RPNTestMixin, BBoxTestMixin):
                     scale_factor,
                     rescale=rescale,
                     cfg=rcnn_test_cfg)
-                bbox_result = bbox2result(det_bboxes, det_labels,
-                                          bbox_head.num_classes)
+                bbox_result = bbox2result(det_bboxes, det_labels, bbox_head.num_classes)
                 ms_bbox_result['stage{}'.format(i)] = bbox_result
 
                 if self.with_mask:
@@ -247,8 +251,7 @@ class CascadeRCNN(BaseDetector, RPNTestMixin, BBoxTestMixin):
 
             if i < self.num_stages - 1:
                 bbox_label = cls_score.argmax(dim=1)
-                rois = bbox_head.regress_by_class(rois, bbox_label, bbox_pred,
-                                                  img_meta[0])
+                rois = bbox_head.regress_by_class(rois, bbox_label, bbox_pred, img_meta[0])
 
         cls_score = sum(ms_scores) / self.num_stages
         det_bboxes, det_labels = self.bbox_head[-1].get_det_bboxes(
@@ -259,6 +262,8 @@ class CascadeRCNN(BaseDetector, RPNTestMixin, BBoxTestMixin):
             scale_factor,
             rescale=rescale,
             cfg=rcnn_test_cfg)
+        if created:
+            del img
         return det_bboxes, det_labels, ms_bbox_result, ms_segm_result
 
     def simple_test(self, img, img_meta, proposals=None, rescale=False):
@@ -317,5 +322,4 @@ class CascadeRCNN(BaseDetector, RPNTestMixin, BBoxTestMixin):
         else:
             if isinstance(result, dict):
                 result = result['ensemble']
-        super(CascadeRCNN, self).show_result(data, result, img_norm_cfg,
-                                             **kwargs)
+        super(CascadeRCNN, self).show_result(data, result, img_norm_cfg, **kwargs)

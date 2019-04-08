@@ -53,7 +53,7 @@ class BaseDetector(nn.Module):
         l1 = []
         l2 = []
         for img, img_meta in zip(imgs, img_metas):
-            det_bboxes, det_scores, _, _ = self._simple_test(img, img_meta, proposals, True, return_lb=False)
+            det_bboxes, det_scores, _, _ = self._simple_test(img, img_meta, proposals, False, return_lb=False)
             if det_bboxes.shape[0] == 0:
                 continue
             assert det_bboxes.shape[1] == 4
@@ -65,8 +65,6 @@ class BaseDetector(nn.Module):
             tran = img_meta[0].get('translation', (0, 0))
             det_bboxes = bbox_mapping_back(det_bboxes, img_shape, scale_factor, flip, tran=tran)
             assert det_bboxes.shape[1] == 4
-            gsd_scale_factor = img_meta[0]['gsd_scale_factor']
-            det_bboxes[:, :4] = det_bboxes[:, :4] / gsd_scale_factor
 
             l1.append(det_bboxes)
             l2.append(det_scores)
@@ -74,18 +72,18 @@ class BaseDetector(nn.Module):
         merged_scores = torch.cat(l2, dim=0)
         assert merged_scores.max() <= 1.
 
-        det_bboxes, det_labels = multiclass_nms(
+        merged_bboxes, merged_labels = multiclass_nms(
             merged_bboxes, merged_scores, self.test_cfg.rcnn.score_thr,
             self.test_cfg.rcnn.nms, self.test_cfg.rcnn.max_per_img
         )
 
         # threshold
-        inds = det_bboxes[:, -1] > self.test_cfg.rcnn.score_thr
-        det_bboxes = det_bboxes[inds, :]
-        det_labels = det_labels[inds]
+        inds = merged_bboxes[:, -1] > self.test_cfg.rcnn.score_thr
+        merged_bboxes = merged_bboxes[inds, :]
+        det_labels = merged_labels[inds]
 
         # nms cross classes
-        det_bboxes, inds = nms(det_bboxes, 0.7)  # TODO
+        det_bboxes, inds = nms(merged_bboxes, 0.7)  # TODO
         det_labels = det_labels[inds]
 
         assert det_bboxes[:, 4].max() <= 1.
@@ -93,8 +91,8 @@ class BaseDetector(nn.Module):
         # filter out small boxes
         valid_idx = det_bboxes[:, 0] >= 0
         valid_idx = valid_idx * (det_bboxes[:, 1] >= 0)
-        valid_idx = valid_idx * (det_bboxes[:, 0] < img_metas[0][0]['ori_shape'][1] * img_metas[0][0]['gsd_scale_factor'])
-        valid_idx = valid_idx * (det_bboxes[:, 1] < img_metas[0][0]['ori_shape'][0] * img_metas[0][0]['gsd_scale_factor'])
+        valid_idx = valid_idx * (det_bboxes[:, 0] < img_metas[0][0]['ori_shape'][1])
+        valid_idx = valid_idx * (det_bboxes[:, 1] < img_metas[0][0]['ori_shape'][0])
         valid_idx = valid_idx * ((det_bboxes[:, 2] - det_bboxes[:, 0]) > 2)
         valid_idx = valid_idx * ((det_bboxes[:, 3] - det_bboxes[:, 1]) > 2)
         _det_bboxes = det_bboxes[valid_idx, :]
@@ -116,18 +114,15 @@ class BaseDetector(nn.Module):
 
     def forward_test(self, imgs, img_metas, **kwargs):
         for var, name in [(imgs, 'imgs'), (img_metas, 'img_metas')]:
-            if not isinstance(var, list):
-                raise TypeError('{} must be a list, but got {}'.format(
-                    name, type(var)))
+            if not isinstance(var, (list, tuple)):
+                raise TypeError('{} must be a list, but got {}'.format(name, type(var)))
 
         num_augs = len(imgs)
         if num_augs != len(img_metas):
-            raise ValueError(
-                'num of augmentations ({}) != num of image meta ({})'.format(
-                    len(imgs), len(img_metas)))
+            raise ValueError('num of augmentations ({}) != num of image meta ({})'.format(len(imgs), len(img_metas)))
         # TODO: remove the restriction of imgs_per_gpu == 1 when prepared
         imgs_per_gpu = imgs[0].size(0)
-        assert imgs_per_gpu == 1
+        assert imgs_per_gpu == 1, imgs_per_gpu
 
         # if num_augs == 1:
         #     return self.simple_test(imgs[0], img_metas[0], **kwargs)

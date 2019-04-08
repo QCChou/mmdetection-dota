@@ -10,7 +10,6 @@ from mmdet.datasets import get_dataset
 from mmdet.apis import (train_detector, init_dist, get_root_logger,
                         set_random_seed)
 from mmdet.models import build_detector
-import torch
 
 
 def parse_args():
@@ -36,6 +35,7 @@ def parse_args():
     parser.add_argument('--local_rank', type=int, default=0)
     parser.add_argument('--epoch', type=int, default=-1)
     parser.add_argument('--lr', type=float, default=-1)
+    parser.add_argument('--batch', type=int, default=-1)
     args = parser.parse_args()
 
     if args.resume_from and '/' not in args.resume_from:
@@ -72,6 +72,8 @@ def main():
         cfg.total_epochs = args.epoch
     if args.lr > 0:
         cfg.optimizer['lr'] = args.lr
+    if args.batch > 0:
+        cfg.data['imgs_per_gpu'] = args.batch
 
     # init logger before other steps
     logger = get_root_logger(cfg.log_level)
@@ -82,9 +84,7 @@ def main():
         logger.info('Set random seed to {}'.format(args.seed))
         set_random_seed(args.seed)
 
-    model = build_detector(
-        cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
-
+    model = build_detector(cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
     train_dataset = get_dataset(cfg.data.train)
     train_detector(
         model,

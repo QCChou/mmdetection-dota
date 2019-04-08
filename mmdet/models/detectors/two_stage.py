@@ -198,8 +198,8 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
         # filter out small boxes
         valid_idx = _det_bboxes[:, 0] >= 0
         valid_idx = valid_idx * (_det_bboxes[:, 1] >= 0)
-        valid_idx = valid_idx * (_det_bboxes[:, 0] < img_metas[0][0]['ori_shape'][1] * img_metas[0][0]['gsd_scale_factor'])
-        valid_idx = valid_idx * (_det_bboxes[:, 1] < img_metas[0][0]['ori_shape'][0] * img_metas[0][0]['gsd_scale_factor'])
+        valid_idx = valid_idx * (_det_bboxes[:, 0] < img_metas[0][0]['ori_shape'][1])
+        valid_idx = valid_idx * (_det_bboxes[:, 1] < img_metas[0][0]['ori_shape'][0])
         valid_idx = valid_idx * ((_det_bboxes[:, 2] - _det_bboxes[:, 0]) > 2)
         valid_idx = valid_idx * ((_det_bboxes[:, 3] - _det_bboxes[:, 1]) > 2)
         _det_bboxes = _det_bboxes[valid_idx, :]

@@ -31,6 +31,9 @@ logger.addHandler(ch)
 
 _dota_root = '/data/public/rw/team-autolearn/aerial/DOTA/v1.5_hbb_190402/'
 _size = 1024
+_target_gsd = (0.15, 0.4)
+_gsd_aug = 0.01
+_overlap = (0.5, 0.5)
 
 
 class DotaPreprocess:
@@ -43,7 +46,7 @@ class DotaDataset(Dataset, DotaPreprocess):
                  img_norm_cfg=None, img_scale=(1333, 800), resize_keep_ratio=True, flip_ratio=0.,
                  size_divisor=32, test_mode=False, **kwargs):
         super(DotaDataset, self).__init__(target_gsd)
-        print(kwargs.keys())
+        print('unresolved arguments', kwargs.keys())
         self.CLASSES = wordname_16
 
         self.settype = settype
@@ -58,10 +61,10 @@ class DotaDataset(Dataset, DotaPreprocess):
         self.dota = DOTA(root)
 
         x = self.dota.imglist
+        y = []
         if 'cv' in settype:
             # stratified split
             cv = 0  # TODO
-            y = []
             cnt_obj = 0
             for id in x:
                 anns = self.dota.ImgToAnns[id]
@@ -87,17 +90,38 @@ class DotaDataset(Dataset, DotaPreprocess):
         logger.info('settype=%s filtered, size=%d' % (self.settype, len(self.index)))
         assert len(self.index) > 0
 
+        # oversampling
+        if 'train' in settype:
+            ratio = [1, 2, 4, 4, 2,
+                     1, 1, 1, 2, 4,
+                     2, 4, 1, 2, 2,
+                     8]
+            over_index = []
+            for id, lb in zip(self.index, y):
+                max_ratio = max([r if onehot_lb == 1 else 1 for r, onehot_lb in zip(ratio, lb)])
+                over_index.extend([id] * max_ratio)
+            random.shuffle(over_index)
+            self.index = over_index
+            logger.info('oversampled, size=%d' % len(self.index))
+
         # transforms
         self.multiscale_mode = 'range'
         self.img_scales = img_scale if isinstance(img_scale, list) else [img_scale]
         if not img_norm_cfg:
             img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
+        self.img_norm_cfg = img_norm_cfg
+        if test_mode:
+            img_norm_cfg = dict(mean=[0, 0, 0], std=[1, 1, 1], to_rgb=False)
         self.img_transform = ImageTransform(size_divisor=size_divisor, **img_norm_cfg)
         self.bbox_transform = BboxTransform()
         self.numpy2tensor = Numpy2Tensor()
 
         # gsd normalization
-        self.gsd_aug = GSDNormalizedCrop(crop_size=(_size, _size), random_crop=(not self.test_mode))  # TODO : parameters
+        self.gsd_aug = GSDNormalizedCrop(
+            crop_size=(_size, _size),
+            random_crop=(not self.test_mode),
+            target_gsd=_target_gsd
+        )  # TODO : parameters
 
         # if use extra augmentation
         if extra_aug is not None:
@@ -138,13 +162,14 @@ class DotaDataset(Dataset, DotaPreprocess):
         gsd = self.dota.gsd(imgid)
         gt_bboxes, gt_labels = self.get_ann_info(index)
 
-        # gsd normalization & random crop
-        if self.gsd_aug:
-            img, gt_bboxes, gt_labels, gsd_scale = self.gsd_aug(img, gt_bboxes, gt_labels, gsd)
-        else:
-            gsd_scale = 1.
-
         if not self.test_mode:
+            # gsd normalization & random crop
+            if self.gsd_aug:
+                selected_cls = random.choice(list(set(gt_labels)))
+                img, gt_bboxes, gt_labels, gsd_scale = self.gsd_aug(img, gt_bboxes, gt_labels, gsd, -1, selected_cls)
+            else:
+                gsd_scale = 1.
+
             # extra augmentation
             if self.extra_aug is not None:
                 img, gt_bboxes, gt_labels = self.extra_aug(img, gt_bboxes, gt_labels)
@@ -165,8 +190,7 @@ class DotaDataset(Dataset, DotaPreprocess):
                 ori_shape=ori_shape,
                 img_shape=img_shape,
                 pad_shape=pad_shape,
-                scale_factor=scale_factor,
-                gsd_scale_factor=gsd_scale,
+                scale_factor=scale_factor * gsd_scale,
                 flip=flip)
 
             data = dict(
@@ -181,26 +205,30 @@ class DotaDataset(Dataset, DotaPreprocess):
         else:
             imgs = []
             img_metas = []
-            # for img_scale in self.img_scales:
-            # sliding window
-            windows = sw.generate(img, sw.DimOrder.HeightWidthChannel, _size, 0.5)
-            for window in windows:
-                _img_w = img[window.indices()]
+            for gsd_idx in range(len(_target_gsd)):
+                img_g, gt_bboxes_g, gt_labels_g, gsd_scale_g = self.gsd_aug(img, gt_bboxes, gt_labels, gsd, gsd_idx, -1)
 
-                for flip_h in [False, True]:
-                    _img, _img_shape, _pad_shape, _scale_factor = self.img_transform(_img_w, self.img_scales[0], flip_h, keep_ratio=self.resize_keep_ratio)
-                    _gt_bboxes = self.bbox_transform(gt_bboxes, _img_shape, _scale_factor, flip_h)
+                # 각 window마다 매번 normalize하는게 느려서 따로 처리하도록 함
+                img_g = mmcv.imnormalize(img_g, self.img_norm_cfg['mean'], self.img_norm_cfg['std'], True)
 
-                    imgs.append(to_tensor(_img))
-                    img_metas.append(DC(dict(
-                        ori_shape=ori_shape,
-                        img_shape=(_img.shape[1], _img.shape[2], 3),
-                        pad_shape=(_img.shape[1], _img.shape[2], 3),
-                        translation=(window.x, window.y),
-                        scale_factor=_scale_factor,
-                        gsd_scale_factor=gsd_scale,
-                        flip=flip_h
-                    ), cpu_only=True))
+                # sliding window
+                windows = sw.generate(img_g, sw.DimOrder.HeightWidthChannel, _size, _overlap[gsd_idx])
+                for window in windows:
+                    _img_w = img_g[window.indices()]
+
+                    for flip_h in [False]:
+                        _img, _img_shape, _pad_shape, _scale_factor = self.img_transform(_img_w, self.img_scales[0], flip_h, keep_ratio=self.resize_keep_ratio)
+                        # _gt_bboxes = self.bbox_transform(gt_bboxes_g, _img_shape, _scale_factor, flip_h)
+
+                        imgs.append(to_tensor(_img))
+                        img_metas.append(DC(dict(
+                            ori_shape=ori_shape,
+                            img_shape=(_img.shape[1], _img.shape[2], 3),
+                            pad_shape=(_img.shape[1], _img.shape[2], 3),
+                            translation=(window.x, window.y),
+                            scale_factor=_scale_factor * gsd_scale_g,
+                            flip=flip_h
+                        ), cpu_only=True))
 
             data = dict(img=imgs, img_meta=img_metas)
             return data
@@ -228,12 +256,20 @@ class GSDNormalizedCrop(object):
         self.target_gsd = target_gsd
         self.random_crop = random_crop
 
-    def __call__(self, img, boxes, labels, gsd):
+    def __call__(self, img, boxes, labels, gsd, target_idx=-1, selected_cls=-1):
         # resize (gsd normalization)
         target_gsd = self.target_gsd
         if isinstance(self.target_gsd, (list, tuple)):
-            target_gsd = random.choice(self.target_gsd)
-        scale = target_gsd / gsd
+            if target_idx >= 0:
+                target_gsd = target_gsd[target_idx]
+            else:
+                target_gsd = random.choice(target_gsd)
+
+        if target_gsd < 0:
+            # augment
+            target_gsd += random.uniform(-_gsd_aug, _gsd_aug)
+
+        scale = gsd / target_gsd
         img = mmcv.imrescale(img, scale)
         boxes = (boxes.astype(np.float64) * scale + 0.5).astype(np.int64)
 
@@ -252,7 +288,7 @@ class GSDNormalizedCrop(object):
         while not_cropped:
             min_iou = random.choice(self.min_iou)
 
-            for i in range(50):
+            for i in range(100):
                 left = random.uniform(0, w - new_w)
                 top = random.uniform(0, h - new_h)
 
@@ -260,6 +296,10 @@ class GSDNormalizedCrop(object):
                 overlaps = bbox_overlaps(patch.reshape(-1, 4), boxes.reshape(-1, 4)).reshape(-1)
                 if overlaps.min() < min_iou:
                     continue
+                if selected_cls >= 0:
+                    overlap_idx = overlaps > min_iou
+                    if not (labels[overlap_idx] == selected_cls).any():
+                        continue
 
                 # center of boxes should inside the crop img
                 center = (boxes[:, :2] + boxes[:, 2:]) / 2

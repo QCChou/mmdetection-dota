@@ -65,18 +65,28 @@ class DistEvalHook(Hook):
         if not force_run and not self.every_n_epochs(runner, self.interval):
             return
         runner.model.eval()
+
         results = [None for _ in range(len(self.dataset))]
         prog_bar = mmcv.ProgressBar(len(self.dataset))
         for idx in range(runner.rank, len(self.dataset), runner.world_size):
             data = self.dataset[idx]
-            img = self.dataset.get_img(idx)
-            data_gpu = scatter(collate([data], samples_per_gpu=1), [torch.cuda.current_device()])[0]
+
+            # print(len(data['img']))
+            # if len(data['img']) > 0:     # TODO
+            data = collate([data], samples_per_gpu=1)
+            data['img_meta'] = [x.data[0] for x in data['img_meta']]
+            lazy = True
+            # else:
+            #     data = scatter(collate([data], samples_per_gpu=1), [torch.cuda.current_device()])[0]
+            #     lazy = False
 
             # compute output
             with torch.no_grad():
-                result = runner.model(return_loss=False, rescale=True, **data_gpu)
+                result = runner.model(return_loss=False, rescale=True, lazy=lazy, **data)
 
+            # log result images
             from mmdet.apis import show_result
+            img = self.dataset.get_img(idx)
             # img = mmcv.imresize(img, data)
             show_result(img, result, dataset='dota', score_thr=0.01, out_file=os.path.join(self.debug_root, 'result%05d.jpg' % idx))
             results[idx] = result
