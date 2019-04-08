@@ -271,7 +271,7 @@ class CascadeRCNN(BaseDetector, RPNTestMixin, BBoxTestMixin):
         scale_factor = img_meta[0]['scale_factor']
         rcnn_test_cfg = self.test_cfg.rcnn
 
-        det_bboxes, det_labels, ms_bbox_result, ms_segm_result = self._simple_test(img, img_meta, proposals=None, rescale=False)
+        det_bboxes, det_labels, ms_bbox_result, ms_segm_result = self._simple_test(img, img_meta, proposals=None, rescale=rescale)
         bbox_result = bbox2result(det_bboxes, det_labels, self.bbox_head[-1].num_classes)
         ms_bbox_result['ensemble'] = bbox_result
 

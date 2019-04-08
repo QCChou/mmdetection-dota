@@ -18,7 +18,7 @@ from mmdet import datasets
 
 class DistEvalHook(Hook):
 
-    def __init__(self, dataset, interval=50, debug_root='./debug/'):
+    def __init__(self, dataset, interval=100, debug_root='./debug/'):
         if isinstance(dataset, Dataset):
             self.dataset = dataset
         elif isinstance(dataset, dict):

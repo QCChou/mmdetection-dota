@@ -31,7 +31,7 @@ logger.addHandler(ch)
 
 _dota_root = '/data/public/rw/team-autolearn/aerial/DOTA/v1.5_hbb_190402/'
 _size = 1024
-_target_gsd = (0.15, 0.4)
+_target_gsd = (0.25, 0.6)
 _gsd_aug = 0.01
 _overlap = (0.5, 0.5)
 
