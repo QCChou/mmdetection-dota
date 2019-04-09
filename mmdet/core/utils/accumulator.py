@@ -1,3 +1,4 @@
+import json
 from collections import defaultdict
 
 
@@ -32,3 +33,6 @@ class Accumulator:
             else:
                 newone[key] = value / other
         return newone
+
+    def __str__(self):
+        return json.dumps(self.metrics, indent=4)
