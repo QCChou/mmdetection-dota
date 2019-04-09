@@ -55,7 +55,7 @@ class DOTA:
         return list(imgids)
 
     def gsd(self, imgId):
-        return self.ImgToGsd[imgId]
+        return self.ImgToGsd.get(imgId, -1.)
 
     def loadAnns(self, catNms=[], imgId = None, difficult=None):
         """
