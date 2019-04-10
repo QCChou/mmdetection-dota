@@ -1,6 +1,6 @@
 #The code is used for visulization, inspired from cocoapi
 #  Licensed under the Simplified BSD License [see bsd.txt]
-
+import json
 import os
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
@@ -20,7 +20,8 @@ class DOTA:
         self.basepath = basepath
         self.labelpath = os.path.join(basepath, 'labelTxt')
         self.imagepath = os.path.join(basepath, 'images')
-        self.imgpaths = GetFileFromThisRootDir(self.labelpath, ext='txt')
+        self.lbpaths = GetFileFromThisRootDir(self.labelpath, ext='txt')
+        self.imgpaths = GetFileFromThisRootDir(self.imagepath, ext='png')
         self.imglist = sorted([custombasename(x) for x in self.imgpaths])
         self.catToImgs = defaultdict(list)
         self.ImgToAnns = defaultdict(list)
@@ -28,7 +29,7 @@ class DOTA:
         self.createIndex()
 
     def createIndex(self):
-        for filename in self.imgpaths:
+        for filename in self.lbpaths:
             gsd, objects = parse_dota_poly(filename)
             imgid = custombasename(filename)
             self.ImgToAnns[imgid] = objects
@@ -36,6 +37,16 @@ class DOTA:
                 cat = obj['name']
                 self.catToImgs[cat].append(imgid)
             self.ImgToGsd[imgid] = gsd
+
+    def load_gsd(self, json_path, load_all=False):
+        with open(json_path, 'r') as f:
+            gsd_estimated = json.load(f)
+
+        for key in gsd_estimated.keys():
+            if not load_all and self.ImgToGsd.get(key, -1) > 0:
+                continue
+            self.ImgToGsd[key] = gsd_estimated[key]['prediction']
+            print('gsd for %s loaded. %.4f' % (key, self.ImgToGsd[key]))
 
     def getImgIds(self, catNms=[]):
         """

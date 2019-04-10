@@ -1,6 +1,6 @@
 import mmcv
 import numpy as np
-from terminaltables import AsciiTable
+from terminaltables import AsciiTable, GithubFlavoredMarkdownTable
 
 from .bbox_overlaps import bbox_overlaps
 from .class_names import get_classes
@@ -201,8 +201,7 @@ def tpfp_default(det_bboxes, gt_bboxes, gt_ignore, iou_thr, area_ranges=None):
 
 def get_cls_results(det_results, gt_bboxes, gt_labels, gt_ignore, class_id):
     """Get det results and gt information of a certain class."""
-    cls_dets = [det[class_id]
-                for det in det_results]  # det bboxes of this class
+    cls_dets = [det[class_id] for det in det_results]  # det bboxes of this class
     cls_gts = []  # gt bboxes of this class
     cls_gt_ignore = []
     for j in range(len(gt_bboxes)):
@@ -258,8 +257,7 @@ def eval_map(det_results,
     ]
     for i in range(num_classes):
         # get gt and det bboxes of this class
-        cls_dets, cls_gts, cls_gt_ignore = get_cls_results(
-            det_results, gt_bboxes, gt_labels, gt_ignore, i)
+        cls_dets, cls_gts, cls_gt_ignore = get_cls_results(det_results, gt_bboxes, gt_labels, gt_ignore, i)
         # calculate tp and fp for each image
         tpfp_func = (tpfp_imagenet if dataset in ['det', 'vid'] else tpfp_default)
         tpfp = [
@@ -376,6 +374,6 @@ def print_map_summary(mean_ap, results, dataset=None):
             ]
             table_data.append(row_data)
         table_data.append(['mAP', '', '', '', '', '{:.3f}'.format(mean_ap[i])])
-        table = AsciiTable(table_data)
+        table = GithubFlavoredMarkdownTable(table_data)
         table.inner_footing_row_border = True
         print(table.table)

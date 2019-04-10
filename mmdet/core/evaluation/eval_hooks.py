@@ -1,7 +1,9 @@
+import logging
 import os
 import os.path as osp
 import shutil
 import time
+from collections import defaultdict
 
 import mmcv
 import numpy as np
@@ -66,9 +68,19 @@ class DistEvalHook(Hook):
             return
         runner.model.eval()
 
+        # if os.path.exists(osp.join(runner.work_dir, 'result.pkl')):
+        #     results = mmcv.load(osp.join(runner.work_dir, 'result.pkl'))
+        # else:
         results = [None for _ in range(len(self.dataset))]
         prog_bar = mmcv.ProgressBar(len(self.dataset))
         for idx in range(runner.rank, len(self.dataset), runner.world_size):
+            imgid = self.dataset.get_id(idx)
+            cache_path = os.path.join(self.debug_root, 'dump_%s.pkl' % imgid)
+
+            if os.path.exists(cache_path):
+                result = mmcv.load(cache_path)
+                results[idx] = result
+                continue
             data = self.dataset[idx]
 
             # print(len(data['img']))
@@ -84,11 +96,12 @@ class DistEvalHook(Hook):
             with torch.no_grad():
                 result = runner.model(return_loss=False, rescale=True, lazy=lazy, **data)
 
+            mmcv.dump(result, cache_path)
+
             # log result images
             from mmdet.apis import show_result
             img = self.dataset.get_img(idx)
-            # img = mmcv.imresize(img, data)
-            show_result(img, result, dataset='dota', score_thr=0.01, out_file=os.path.join(self.debug_root, 'result%05d.jpg' % idx))
+            show_result(img, result, dataset='dota', score_thr=0.01, out_file=os.path.join(self.debug_root, 'vis_%s.jpg' % imgid))
             results[idx] = result
 
             batch_size = runner.world_size
@@ -104,9 +117,10 @@ class DistEvalHook(Hook):
                 for idx in range(i, len(results), runner.world_size):
                     results[idx] = tmp_results[idx]
                 os.remove(tmp_file)
+            mmcv.dump(results, osp.join(runner.work_dir, 'result.pkl'))
             self.evaluate(runner, results)
         else:
-            tmp_file = osp.join(runner.work_dir,'temp_{}.pkl'.format(runner.rank))
+            tmp_file = osp.join(runner.work_dir, 'temp_{}.pkl'.format(runner.rank))
             mmcv.dump(results, tmp_file)
             self._barrier(runner.rank, runner.world_size)
         self._barrier(runner.rank, runner.world_size)
@@ -158,6 +172,28 @@ class DistEvalmAPHook(DistEvalHook):
 class DotaDistEvalmAPHook(DistEvalHook):
 
     def evaluate(self, runner, results):
+        # save for dota submission
+        submission_by_class = defaultdict(list)
+        for idx in range(len(results)):
+            imgid = self.dataset.get_id(idx)
+            result = results[idx]
+            if result is None:
+                logging.warning('no result idx=%d id=%s' % (idx, imgid))
+                continue
+            for class_idx in range(len(result)):
+                for row in result[class_idx]:
+                    submission_by_class[class_idx].append('%s %.3f %0.2f %0.2f %0.2f %0.2f' % (
+                        imgid, row[4], row[0], row[1], row[2], row[3]
+                    ))
+
+        for class_idx in submission_by_class:
+            class_name = self.dataset.CLASSES[class_idx]
+            path = osp.join(runner.work_dir, 'Task2_%s.txt' % class_name)
+            with open(path, 'w') as f:
+                f.write('\n'.join(submission_by_class[class_idx]))
+
+        print(len(results), 'results are saved.', runner.work_dir)
+
         gt_bboxes = []
         gt_labels = []
         for i in range(len(self.dataset)):

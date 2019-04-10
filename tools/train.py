@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument('--epoch', type=int, default=-1)
     parser.add_argument('--lr', type=float, default=-1)
     parser.add_argument('--batch', type=int, default=-1)
+    parser.add_argument('--set', default='cv_valid')
     args = parser.parse_args()
 
     if args.resume_from and '/' not in args.resume_from:
@@ -74,6 +75,7 @@ def main():
         cfg.optimizer['lr'] = args.lr
     if args.batch > 0:
         cfg.data['imgs_per_gpu'] = args.batch
+    cfg.data['val']['settype'] = args.set
 
     # init logger before other steps
     logger = get_root_logger(cfg.log_level)

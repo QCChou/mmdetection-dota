@@ -95,8 +95,8 @@ class BBoxTestMixin(object):
         det_labels = det_labels[inds]
 
         # nms across classes
-        det_bboxes, inds = nms(det_bboxes, 0.7)
-        det_labels = det_labels[inds]
+        # det_bboxes, inds = nms(det_bboxes, 0.7)
+        # det_labels = det_labels[inds]
 
         return det_bboxes, det_labels
 

@@ -141,11 +141,11 @@ test_cfg = dict(
         nms_pre=2000,
         nms_post=2000,
         max_num=1000,
-        nms_thr=0.6,
+        nms_thr=0.7,
         min_bbox_size=0),
     rcnn=dict(
-        score_thr=0.2,
-        nms=dict(type='soft_nms', iou_thr=0.3),
+        score_thr=0.1,
+        nms=dict(type='soft_nms', iou_thr=0.7),
         max_per_img=10000
     ),
     keep_all_stages=False)
@@ -156,7 +156,7 @@ img_size_divisor = 32
 img_scale = (1280, 1024)
 data = dict(
     imgs_per_gpu=2,
-    workers_per_gpu=2,
+    workers_per_gpu=4,
     train=dict(
         type='DotaDataset',
         settype='cv_train',
@@ -176,7 +176,7 @@ data = dict(
         with_label=True,
         test_mode=True),
     test=dict(
-        type='DotaTestDataset',
+        type='DotaDataset',
         img_scale=img_scale,
         img_norm_cfg=img_norm_cfg,
         size_divisor=img_size_divisor,

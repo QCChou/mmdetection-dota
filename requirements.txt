@@ -2,3 +2,4 @@ shapely
 iterative-stratification
 pretrainedmodels
 fire
+colored

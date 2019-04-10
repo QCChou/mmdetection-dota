@@ -5,7 +5,6 @@ import random
 
 import mmcv
 import numpy as np
-import torch
 import slidingwindow as sw
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
 from torch.utils.data import Dataset
@@ -31,40 +30,48 @@ logger.addHandler(ch)
 
 _dota_root = '/data/public/rw/team-autolearn/aerial/DOTA/v1.5_hbb_190402/'
 _size = 1024
-_target_gsd = (0.25, 0.6)
+_target_gsd = (0.25, 0.40)
 _gsd_aug = 0.01
 _overlap = (0.5, 0.5)
+oversample_ratio = [1, 2, 4, 4, 2,
+                    1, 1, 1, 2, 4,
+                    2, 4, 1, 2, 2,
+                    8]
+print('target_gsd=', _target_gsd)
 
 
-class DotaPreprocess:
-    def __init__(self, target_gsd=None):
-        self.target_gsd = target_gsd
-
-
-class DotaDataset(Dataset, DotaPreprocess):
+class DotaDataset(Dataset):
     def __init__(self, settype='cv_train', target_gsd=None, extra_aug=None,
                  img_norm_cfg=None, img_scale=(1333, 800), resize_keep_ratio=True, flip_ratio=0.,
                  size_divisor=32, test_mode=False, **kwargs):
-        super(DotaDataset, self).__init__(target_gsd)
         print('unresolved arguments', kwargs.keys())
         self.CLASSES = wordname_16
 
         self.settype = settype
         self.test_mode = test_mode
+        self.target_gsd = target_gsd
         if settype in ['train', 'cv_train', 'cv_valid']:
             root = os.path.join(_dota_root, 'train')
+            gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/v2_190410/train.json'
         elif settype == 'valid':
             root = os.path.join(_dota_root, 'valid')
+            gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/v2_190410/valid.json'
+        elif settype == 'test':
+            root = os.path.join(_dota_root, 'test')
+            gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/v2_190410/test.json'
         else:
             raise ValueError('invalid settype=%s' % settype)
 
         self.dota = DOTA(root)
+        if settype in ['valid', 'test']:    # TODO : cv 맞추려고 임시로 해둠
+            self.dota.load_gsd(gsd_estim, load_all=False)
 
         x = self.dota.imglist
         y = []
         if 'cv' in settype:
             # stratified split
-            cv = 0  # TODO
+            cv = int(os.environ.get('cv', 0))
+            print('---- cv=', cv)
             cnt_obj = 0
             for id in x:
                 anns = self.dota.ImgToAnns[id]
@@ -92,13 +99,9 @@ class DotaDataset(Dataset, DotaPreprocess):
 
         # oversampling
         if 'train' in settype:
-            ratio = [1, 2, 4, 4, 2,
-                     1, 1, 1, 2, 4,
-                     2, 4, 1, 2, 2,
-                     8]
             over_index = []
             for id, lb in zip(self.index, y):
-                max_ratio = max([r if onehot_lb == 1 else 1 for r, onehot_lb in zip(ratio, lb)])
+                max_ratio = max([r if onehot_lb == 1 else 1 for r, onehot_lb in zip(oversample_ratio, lb)])
                 over_index.extend([id] * max_ratio)
             random.shuffle(over_index)
             self.index = over_index
@@ -124,6 +127,7 @@ class DotaDataset(Dataset, DotaPreprocess):
         )  # TODO : parameters
 
         # if use extra augmentation
+        self.random_rot = RandomRotation()
         if extra_aug is not None:
             self.extra_aug = ExtraAugmentation(**extra_aug)
         else:
@@ -143,6 +147,10 @@ class DotaDataset(Dataset, DotaPreprocess):
         img = self.dota.loadImgs(imgid)[0]
         return img
 
+    def get_id(self, index):
+        imgid = self.dota.imglist[self.index[index]]
+        return imgid
+
     def get_ann_info(self, index):
         imgid = self.dota.imglist[self.index[index]]
         anns = self.dota.loadAnns(imgId=imgid)
@@ -152,7 +160,7 @@ class DotaDataset(Dataset, DotaPreprocess):
         return gt_bboxes, gt_labels
 
     def __getitem__(self, index):
-        imgid = self.dota.imglist[self.index[index]]
+        imgid = self.get_id(index)
 
         # load image
         img = self.get_img(index)
@@ -165,10 +173,17 @@ class DotaDataset(Dataset, DotaPreprocess):
         if not self.test_mode:
             # gsd normalization & random crop
             if self.gsd_aug:
-                selected_cls = random.choice(list(set(gt_labels)))
+                lb_list = []
+                for lb_chosen in set(gt_labels):
+                    lb_list.extend([lb_chosen] * oversample_ratio[lb_chosen])
+
+                selected_cls = random.choice()
                 img, gt_bboxes, gt_labels, gsd_scale = self.gsd_aug(img, gt_bboxes, gt_labels, gsd, -1, selected_cls)
             else:
                 gsd_scale = 1.
+
+            # random rotation
+            img, gt_bboxes = self.random_rot(img, gt_bboxes)
 
             # extra augmentation
             if self.extra_aug is not None:
@@ -237,19 +252,7 @@ class DotaDataset(Dataset, DotaPreprocess):
         return len(self.index)
 
 
-class DotaTestDataset(Dataset):
-    def __init__(self, img_norm_cfg=None, img_scale=(1333, 800), flip_ratio=0.):
-        pass
-
-    def __getitem__(self, index):
-        pass
-
-    def __len__(self):
-        pass
-
-
 class GSDNormalizedCrop(object):
-
     def __init__(self, crop_size=(_size, _size), random_crop=True, min_iou=0.3, target_gsd=0.25):
         self.crop_size = crop_size
         self.min_iou = [min_iou] * 9 + [0]
@@ -318,6 +321,38 @@ class GSDNormalizedCrop(object):
                 break
 
         return img, boxes, labels, scale
+
+
+class RandomRotation(object):
+    def __call__(self, img, boxes):
+        r = random.choice([0, 90, 180, 270])
+        if not r:
+            return img, boxes
+        h, w = img.shape[:2]
+        img_r = mmcv.imrotate(img, r, auto_bound=True)
+        assert img_r.shape[0] == img.shape[1]
+        assert img_r.shape[1] == img.shape[0]
+        assert img_r.shape[2] == img.shape[2]
+
+        boxes_r = np.zeros_like(boxes, dtype=np.int)
+        if r == 90:
+            boxes_r[:, 0] = h - boxes[:, 1]
+            boxes_r[:, 2] = h - boxes[:, 3]
+            boxes_r[:, 1] = boxes[:, 0]
+            boxes_r[:, 3] = boxes[:, 2]
+        elif r == 180:
+            boxes_r[:, 0] = w - boxes[:, 0]
+            boxes_r[:, 2] = w - boxes[:, 2]
+            boxes_r[:, 1] = h - boxes[:, 1]
+            boxes_r[:, 3] = h - boxes[:, 3]
+        elif r == 270:
+            boxes_r[:, 0] = boxes[:, 1]
+            boxes_r[:, 2] = boxes[:, 3]
+            boxes_r[:, 1] = w - boxes[:, 0]
+            boxes_r[:, 3] = w - boxes[:, 2]
+        else:
+            raise ValueError(r)
+        return img_r, boxes
 
 
 def one_hot(labels):

@@ -1,4 +1,7 @@
 import argparse
+import logging
+import os
+from collections import defaultdict
 
 import torch
 import mmcv
@@ -108,7 +111,7 @@ def main():
             range(args.gpus),
             workers_per_gpu=args.proc_per_gpu)
 
-    if isinstance(dataset, DotaDataset):
+    if args.set != 'test' and isinstance(dataset, DotaDataset):
         gt_bboxes = []
         gt_labels = []
         for i in range(len(dataset)):

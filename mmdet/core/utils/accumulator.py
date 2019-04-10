@@ -6,8 +6,10 @@ class Accumulator:
     def __init__(self):
         self.metrics = defaultdict(lambda: 0.)
 
-    def add(self, key, value):
-        self.metrics[key] += value
+    def add(self, key=None, value=None, **kwargs):
+        if key and value:
+            self.metrics[key] += value
+        self.add_dict(kwargs)
 
     def add_dict(self, dict):
         for key, value in dict.items():
