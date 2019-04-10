@@ -193,7 +193,7 @@ lr_config = dict(
     warmup_iters=700,
     warmup_ratio=1.0 / 3,
     step=[200, 300, 400])
-checkpoint_config = dict(interval=1)
+checkpoint_config = dict(interval=20)
 # yapf:disable
 log_config = dict(
     interval=1000,

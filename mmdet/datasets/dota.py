@@ -177,7 +177,7 @@ class DotaDataset(Dataset):
                 for lb_chosen in set(gt_labels):
                     lb_list.extend([lb_chosen] * oversample_ratio[lb_chosen])
 
-                selected_cls = random.choice()
+                selected_cls = random.choice(lb_list)
                 img, gt_bboxes, gt_labels, gsd_scale = self.gsd_aug(img, gt_bboxes, gt_labels, gsd, -1, selected_cls)
             else:
                 gsd_scale = 1.
