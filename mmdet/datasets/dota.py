@@ -31,13 +31,13 @@ logger.addHandler(ch)
 _dota_root = '/data/public/rw/team-autolearn/aerial/DOTA/v1.5_hbb_190402/'
 _size = 1024
 _target_gsd = (0.25, 0.40)
-_gsd_aug = 0.01
+_gsd_aug = 0.05
 _overlap = (0.5, 0.5)
 oversample_ratio = [1, 2, 4, 4, 2,
                     1, 1, 1, 2, 4,
                     2, 4, 1, 2, 2,
                     8]
-print('target_gsd=', _target_gsd)
+# print('target_gsd=', _target_gsd)
 
 
 class DotaDataset(Dataset):
@@ -63,21 +63,19 @@ class DotaDataset(Dataset):
             raise ValueError('invalid settype=%s' % settype)
 
         self.dota = DOTA(root)
-        if settype in ['valid', 'test']:    # TODO : cv 맞추려고 임시로 해둠
+        if settype in ['train', 'valid', 'test']:    # TODO : cv 맞추려고 임시로 해둠
             self.dota.load_gsd(gsd_estim, load_all=False)
 
         x = self.dota.imglist
         y = []
+        for id in x:
+            anns = self.dota.ImgToAnns[id]
+            lbs = list(set([ann['name'] for ann in anns]))
+            y.append(one_hot(lbs))
         if 'cv' in settype:
             # stratified split
             cv = int(os.environ.get('cv', 0))
             print('---- cv=', cv)
-            cnt_obj = 0
-            for id in x:
-                anns = self.dota.ImgToAnns[id]
-                lbs = list(set([ann['name'] for ann in anns]))
-                y.append(one_hot(lbs))
-                cnt_obj += len(anns)
 
             mskf = MultilabelStratifiedKFold(n_splits=5, random_state=0)
             train_index = valid_index = None
@@ -92,8 +90,9 @@ class DotaDataset(Dataset):
             self.index = list(range(len(x)))
         logger.info('settype=%s loaded, size=%d' % (self.settype, len(self.index)))
 
-        # filter out datas without gsd info.
+        # filter out datas without gt / gsd info.
         self.index = list(filter(lambda i: self.dota.gsd(self.dota.imglist[i]) > 0, self.index))
+        self.index = list(filter(lambda i: len(self.dota.ImgToAnns[self.dota.imglist[i]]) > 0, self.index))
         logger.info('settype=%s filtered, size=%d' % (self.settype, len(self.index)))
         assert len(self.index) > 0
 
@@ -106,6 +105,7 @@ class DotaDataset(Dataset):
             random.shuffle(over_index)
             self.index = over_index
             logger.info('oversampled, size=%d' % len(self.index))
+        assert len(self.index) > 0
 
         # transforms
         self.multiscale_mode = 'range'
@@ -175,15 +175,15 @@ class DotaDataset(Dataset):
             if self.gsd_aug:
                 lb_list = []
                 for lb_chosen in set(gt_labels):
-                    lb_list.extend([lb_chosen] * oversample_ratio[lb_chosen])
+                    lb_list.extend([lb_chosen] * oversample_ratio[lb_chosen - 1])
 
-                selected_cls = random.choice(lb_list)
+                selected_cls = random.choice(lb_list) if len(lb_list) else -1
                 img, gt_bboxes, gt_labels, gsd_scale = self.gsd_aug(img, gt_bboxes, gt_labels, gsd, -1, selected_cls)
             else:
                 gsd_scale = 1.
 
             # random rotation
-            img, gt_bboxes = self.random_rot(img, gt_bboxes)
+            img, gt_bboxes, ori_shape = self.random_rot(img, gt_bboxes, ori_shape)
 
             # extra augmentation
             if self.extra_aug is not None:
@@ -260,6 +260,8 @@ class GSDNormalizedCrop(object):
         self.random_crop = random_crop
 
     def __call__(self, img, boxes, labels, gsd, target_idx=-1, selected_cls=-1):
+        assert len(boxes) == len(labels)
+
         # resize (gsd normalization)
         target_gsd = self.target_gsd
         if isinstance(self.target_gsd, (list, tuple)):
@@ -290,6 +292,8 @@ class GSDNormalizedCrop(object):
         not_cropped = True
         while not_cropped:
             min_iou = random.choice(self.min_iou)
+            if len(boxes) == 0:
+                min_iou = 0.
 
             for i in range(100):
                 left = random.uniform(0, w - new_w)
@@ -297,26 +301,27 @@ class GSDNormalizedCrop(object):
 
                 patch = np.array((int(left), int(top), int(left + new_w), int(top + new_h)))
                 overlaps = bbox_overlaps(patch.reshape(-1, 4), boxes.reshape(-1, 4)).reshape(-1)
-                if overlaps.min() < min_iou:
+                if len(overlaps) > 0 and overlaps.min() < min_iou:
                     continue
                 if selected_cls >= 0:
                     overlap_idx = overlaps > min_iou
                     if not (labels[overlap_idx] == selected_cls).any():
                         continue
 
-                # center of boxes should inside the crop img
-                center = (boxes[:, :2] + boxes[:, 2:]) / 2
-                mask = (center[:, 0] > patch[0]) * (center[:, 1] > patch[1]) * (center[:, 0] < patch[2]) * (center[:, 1] < patch[3])
-                if not mask.any():
-                    continue
-                boxes = boxes[mask]
-                labels = labels[mask]
+                if len(boxes) > 0:
+                    # center of boxes should inside the crop img
+                    center = (boxes[:, :2] + boxes[:, 2:]) / 2
+                    mask = (center[:, 0] > patch[0]) * (center[:, 1] > patch[1]) * (center[:, 0] < patch[2]) * (center[:, 1] < patch[3])
+                    if not mask.any():
+                        continue
+                    boxes = boxes[mask]
+                    labels = labels[mask]
 
-                # adjust boxes
+                    # adjust boxes
+                    boxes[:, 2:] = boxes[:, 2:].clip(max=patch[2:])
+                    boxes[:, :2] = boxes[:, :2].clip(min=patch[:2])
+                    boxes -= np.tile(patch[:2], 2)
                 img = img[patch[1]:patch[3], patch[0]:patch[2]]
-                boxes[:, 2:] = boxes[:, 2:].clip(max=patch[2:])
-                boxes[:, :2] = boxes[:, :2].clip(min=patch[:2])
-                boxes -= np.tile(patch[:2], 2)
                 not_cropped = False
                 break
 
@@ -324,35 +329,46 @@ class GSDNormalizedCrop(object):
 
 
 class RandomRotation(object):
-    def __call__(self, img, boxes):
+    def __call__(self, img, boxes, ori_shape):
         r = random.choice([0, 90, 180, 270])
         if not r:
-            return img, boxes
+            return img, boxes, ori_shape
         h, w = img.shape[:2]
         img_r = mmcv.imrotate(img, r, auto_bound=True)
+        new_h, new_w = img_r.shape[:2]
         assert img_r.shape[0] == img.shape[1]
         assert img_r.shape[1] == img.shape[0]
         assert img_r.shape[2] == img.shape[2]
+        assert len(ori_shape) == 3
 
         boxes_r = np.zeros_like(boxes, dtype=np.int)
-        if r == 90:
-            boxes_r[:, 0] = h - boxes[:, 1]
-            boxes_r[:, 2] = h - boxes[:, 3]
-            boxes_r[:, 1] = boxes[:, 0]
-            boxes_r[:, 3] = boxes[:, 2]
-        elif r == 180:
-            boxes_r[:, 0] = w - boxes[:, 0]
-            boxes_r[:, 2] = w - boxes[:, 2]
-            boxes_r[:, 1] = h - boxes[:, 1]
-            boxes_r[:, 3] = h - boxes[:, 3]
-        elif r == 270:
-            boxes_r[:, 0] = boxes[:, 1]
-            boxes_r[:, 2] = boxes[:, 3]
-            boxes_r[:, 1] = w - boxes[:, 0]
-            boxes_r[:, 3] = w - boxes[:, 2]
-        else:
-            raise ValueError(r)
-        return img_r, boxes
+        if len(boxes) > 0:
+            if r == 90:
+                boxes_r[:, 0] = h - boxes[:, 3]
+                boxes_r[:, 2] = h - boxes[:, 1]
+                boxes_r[:, 1] = boxes[:, 0]
+                boxes_r[:, 3] = boxes[:, 2]
+                ori_shape = (ori_shape[1], ori_shape[0], ori_shape[2])
+            elif r == 180:
+                boxes_r[:, 0] = w - boxes[:, 2]
+                boxes_r[:, 2] = w - boxes[:, 0]
+                boxes_r[:, 1] = h - boxes[:, 3]
+                boxes_r[:, 3] = h - boxes[:, 1]
+            elif r == 270:
+                boxes_r[:, 0] = boxes[:, 1]
+                boxes_r[:, 2] = boxes[:, 3]
+                boxes_r[:, 1] = w - boxes[:, 2]
+                boxes_r[:, 3] = w - boxes[:, 0]
+                ori_shape = (ori_shape[1], ori_shape[0], ori_shape[2])
+            else:
+                raise ValueError(r)
+
+        boxes_r[:, 0] = np.clip(boxes_r[:, 0], 0, new_w)
+        boxes_r[:, 2] = np.clip(boxes_r[:, 2], 0, new_w)
+        boxes_r[:, 1] = np.clip(boxes_r[:, 1], 0, new_h)
+        boxes_r[:, 3] = np.clip(boxes_r[:, 3], 0, new_h)
+        boxes = boxes_r
+        return img_r, boxes, ori_shape
 
 
 def one_hot(labels):
