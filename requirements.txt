@@ -3,3 +3,5 @@ iterative-stratification
 pretrainedmodels
 fire
 colored
+ray
+imgaug

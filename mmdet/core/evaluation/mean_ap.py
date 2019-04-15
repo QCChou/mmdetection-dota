@@ -324,8 +324,6 @@ def eval_map(det_results,
         mean_ap = np.array(aps).mean().item() if aps else 0.0
     if print_summary:
         print_map_summary(mean_ap, eval_results, dataset)
-        for r in eval_results:
-            print('%.4f\t%.4f\t%.4f' % (r['recall'].mean(), r['precision'].mean(), r['ap'].mean()))
 
     return mean_ap, eval_results
 
@@ -338,8 +336,7 @@ def print_map_summary(mean_ap, results, dataset=None):
         results(list): calculated from `eval_map`
         dataset(None or str or list): dataset name or dataset classes.
     """
-    num_scales = len(results[0]['ap']) if isinstance(results[0]['ap'],
-                                                     np.ndarray) else 1
+    num_scales = len(results[0]['ap']) if isinstance(results[0]['ap'], np.ndarray) else 1
     num_classes = len(results)
 
     recalls = np.zeros((num_scales, num_classes), dtype=np.float32)
@@ -377,3 +374,6 @@ def print_map_summary(mean_ap, results, dataset=None):
         table = GithubFlavoredMarkdownTable(table_data)
         table.inner_footing_row_border = True
         print(table.table)
+
+        for j in range(num_classes):
+            print('%.4f\t%.4f\t%.4f' % (recalls[i, j], precisions[i, j], aps[i, j]))

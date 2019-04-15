@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 from .base import BaseDetector
@@ -55,13 +56,40 @@ class SingleStageDetector(BaseDetector):
             *loss_inputs, gt_bboxes_ignore=gt_bboxes_ignore)
         return losses
 
-    def simple_test(self, img, img_meta, rescale=False):
+    def _simple_test(self, img, img_meta, proposals=None, rescale=False, return_lb=False):
+        if not img.is_cuda:
+            img = img.cuda(torch.cuda.current_device())
+            created = True
+        else:
+            created = False
+
         x = self.extract_feat(img)
         outs = self.bbox_head(x)
         bbox_inputs = outs + (img_meta, self.test_cfg, rescale)
         bbox_list = self.bbox_head.get_bboxes(*bbox_inputs)
-        bbox_results = [
-            bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes)
-            for det_bboxes, det_labels in bbox_list
-        ]
-        return bbox_results[0]
+        det_bboxes = [x for x, _ in bbox_list]
+        det_labels = [x for _, x in bbox_list]
+
+        if created:
+            del img
+        if return_lb:
+            return det_bboxes[0], det_labels[0], None, None
+        else:
+            def one_hot_embedding(labels, num_classes=17):
+                """Embedding labels to one-hot form.
+
+                Args:
+                  labels: (LongTensor) class labels, sized [N,].
+                  num_classes: (int) number of classes.
+
+                Returns:
+                  (tensor) encoded labels, sized [N, #classes].
+                """
+                y = torch.eye(num_classes).cuda()
+                return y[labels + 1]
+            return det_bboxes[0][:, :4], one_hot_embedding(det_labels[0]) * det_bboxes[0][:, 4].view(det_bboxes[0][:, 4].shape[0], 1), None, None
+
+    def simple_test(self, img, img_meta, rescale=False):
+        det_bboxes, det_labels, _, _ = self._simple_test(img, img_meta, rescale=False, return_lb=True)
+        bbox_results = bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes)
+        return bbox_results

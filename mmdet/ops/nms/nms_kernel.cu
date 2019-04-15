@@ -106,7 +106,7 @@ void _set_device(int device_id) {
     CUDA_CHECK(cudaSetDevice(device_id));
 }
 
-const size_t MEMORY_SIZE = 500000000;
+const size_t MEMORY_SIZE = 15000000000;
 size_t nms_Malloc() {
     float* boxes_dev = NULL;
     CUDA_CHECK(cudaMalloc(&boxes_dev, MEMORY_SIZE));

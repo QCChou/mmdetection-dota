@@ -1,10 +1,12 @@
 # model settings
 model = dict(
     type='RetinaNet',
-    pretrained='modelzoo://resnet50',
+    pretrained='open-mmlab://resnext101_64x4d',
     backbone=dict(
-        type='ResNet',
-        depth=50,
+        type='ResNeXt',
+        depth=101,
+        groups=64,
+        base_width=4,
         num_stages=4,
         out_indices=(0, 1, 2, 3),
         frozen_stages=1,
@@ -18,7 +20,7 @@ model = dict(
         num_outs=5),
     bbox_head=dict(
         type='RetinaHead',
-        num_classes=81,
+        num_classes=17,
         in_channels=256,
         stacked_convs=4,
         feat_channels=256,
@@ -45,20 +47,20 @@ train_cfg = dict(
 test_cfg = dict(
     nms_pre=1000,
     min_bbox_size=0,
-    score_thr=0.2,
-    nms=dict(type='nms', iou_thr=0.5),
+    score_thr=0.1,
+    nms=dict(type='nms', iou_thr=0.75),
     max_per_img=10000)
 
 # dataset settings
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
 img_size_divisor = 32
-img_scale = (1760, 1024)
+img_scale = (1280, 1024)
 data = dict(
     imgs_per_gpu=2,
-    workers_per_gpu=2,
+    workers_per_gpu=4,
     train=dict(
         type='DotaDataset',
-        settype='cv_train',
+        settype='train',
         img_scale=img_scale,
         img_norm_cfg=img_norm_cfg,
         size_divisor=img_size_divisor,
@@ -67,7 +69,7 @@ data = dict(
         test_mode=False),
     val=dict(
         type='DotaDataset',
-        settype='cv_valid',
+        settype='valid',
         img_scale=img_scale,
         img_norm_cfg=img_norm_cfg,
         size_divisor=img_size_divisor,
@@ -89,24 +91,24 @@ optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
 lr_config = dict(
     policy='step',
     warmup='linear',
-    warmup_iters=500,
+    warmup_iters=700,
     warmup_ratio=1.0 / 3,
-    step=[250, 350, 500])
+    step=[200, 300, 350, 400])
 checkpoint_config = dict(interval=20)
 # yapf:disable
 log_config = dict(
-    interval=50,
+    interval=1000,
     hooks=[
-        dict(type='TextLoggerHook'),
+        dict(type='TextLoggerHook', ignore_last=False),
         # dict(type='TensorboardLoggerHook')
     ])
 # yapf:enable
 # runtime settings
-total_epochs = 600
-device_ids = range(4)
+total_epochs = 360
+device_ids = range(8)
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/retinanet_r50_fpn_1x'
+work_dir = './work_dirs/retinanet_cc/full/'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]

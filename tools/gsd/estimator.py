@@ -14,6 +14,7 @@ from torch.nn import DataParallel, AdaptiveAvgPool2d, SmoothL1Loss, AdaptiveMaxP
 from torch.utils.data import Dataset
 from torchvision.models import resnet18, resnet34
 from torchvision.transforms import transforms
+from pretrainedmodels.models import *
 from tqdm import tqdm
 
 from mmdet.core.evaluation.topk import accuracy_classification
@@ -142,6 +143,20 @@ class GSDEstimator:
                 nn.Linear(512, num_class),
                 nn.Sigmoid()
             )
+        elif backbone == 'se_resnext50':
+            model = se_resnext50_32x4d(pretrained='imagenet')
+            model.avg_pool = AdaptiveAvgPool2d((1, 1))
+            model.last_linear = nn.Sequential(
+                nn.Linear(512 * 4, num_class),
+                nn.Sigmoid()
+            )
+        elif backbone == 'se_resnext101':
+            model = se_resnext101_32x4d(pretrained='imagenet')
+            model.avg_pool = AdaptiveAvgPool2d((1, 1))
+            model.last_linear = nn.Sequential(
+                nn.Linear(512 * 4, num_class),
+                nn.Sigmoid()
+            )
         else:
             raise ValueError('backbone')
         self.model = DataParallel(model).cuda()
@@ -190,7 +205,7 @@ class GSDEstimator:
                 epoch_gen.set_postfix(accumulator / 'cnt')
 
             if i % decay_epoch == 0 or i == epoch:
-                self._save('latest.pth', epoch=i)
+                self._save('%s_latest.pth' % self.backbone, epoch=i)
                 self.dota('train', min_vote=0)
                 self.dota('valid', min_vote=0)
 
@@ -291,7 +306,7 @@ class GSDEstimator:
             print(accumulator / 'cnt')
 
         if verbose:
-            json_path = os.path.join(model_path, '%s.json' % settype)
+            json_path = os.path.join(model_path, '%s_%s.json' % (self.backbone, settype))
             with open(json_path, 'w') as f:
                 json.dump(result_json, f, indent=4)
             log('saved', json_path)

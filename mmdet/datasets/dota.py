@@ -1,4 +1,3 @@
-import itertools
 import logging
 import os
 import random
@@ -20,7 +19,7 @@ from mmdet.datasets.dota_devkit.DOTA import DOTA
 
 
 logger = logging.getLogger('DotaDataset')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 formatter = logging.Formatter('[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s')
@@ -33,38 +32,48 @@ _size = 1024
 _target_gsd = (0.25, 0.40)
 _gsd_aug = 0.05
 _overlap = (0.5, 0.5)
-oversample_ratio = [1, 2, 4, 4, 2,
-                    1, 1, 1, 2, 4,
-                    2, 4, 1, 2, 2,
-                    8]
-# print('target_gsd=', _target_gsd)
+oversample_ratio = [
+    1, 2, 4, 4, 2,
+    1, 1, 1, 2, 4,
+    2, 4, 1, 2, 2,
+    8
+]
 
 
 class DotaDataset(Dataset):
     def __init__(self, settype='cv_train', target_gsd=None, extra_aug=None,
                  img_norm_cfg=None, img_scale=(1333, 800), resize_keep_ratio=True, flip_ratio=0.,
                  size_divisor=32, test_mode=False, **kwargs):
-        print('unresolved arguments', kwargs.keys())
+        # print('unresolved arguments', kwargs.keys())
         self.CLASSES = wordname_16
 
         self.settype = settype
         self.test_mode = test_mode
-        self.target_gsd = target_gsd
+        if target_gsd is None:
+            self.target_gsd = _target_gsd
+        else:
+            self.target_gsd = target_gsd
+        logger.info('target_gsd=%s' % str(self.target_gsd))
+
+        gsd_estim = None
         if settype in ['train', 'cv_train', 'cv_valid']:
             root = os.path.join(_dota_root, 'train')
             gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/v2_190410/train.json'
+        elif settype == 'train_cc':
+            root = os.path.join(_dota_root, 'train_cc')
         elif settype == 'valid':
             root = os.path.join(_dota_root, 'valid')
-            gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/v2_190410/valid.json'
+            gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/ensemble_v2+v3_avg/valid.json'
         elif settype == 'test':
             root = os.path.join(_dota_root, 'test')
-            gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/v2_190410/test.json'
+            gsd_estim = '/data/public/rw/team-autolearn/aerial/gsd_estimation/results/ensemble_v2+v3_avg/test.json'
         else:
             raise ValueError('invalid settype=%s' % settype)
 
         self.dota = DOTA(root)
-        if settype in ['train', 'valid', 'test']:    # TODO : cv 맞추려고 임시로 해둠
-            self.dota.load_gsd(gsd_estim, load_all=False)
+        if gsd_estim and settype in ['train', 'train_cc', 'valid', 'test']:    # TODO : cv 맞추려고 임시로 해둠
+            load_all = 'train' not in settype
+            self.dota.load_gsd(gsd_estim, load_all=load_all)
 
         x = self.dota.imglist
         y = []
@@ -72,10 +81,10 @@ class DotaDataset(Dataset):
             anns = self.dota.ImgToAnns[id]
             lbs = list(set([ann['name'] for ann in anns]))
             y.append(one_hot(lbs))
-        if 'cv' in settype:
+        cv = int(os.environ.get('cv', -1))
+        if 'cv' in settype or cv >= 0:
             # stratified split
-            cv = int(os.environ.get('cv', 0))
-            print('---- cv=', cv)
+            logger.info('---- cv=%d' % cv)
 
             mskf = MultilabelStratifiedKFold(n_splits=5, random_state=0)
             train_index = valid_index = None
@@ -88,12 +97,15 @@ class DotaDataset(Dataset):
                 self.index = valid_index
         else:
             self.index = list(range(len(x)))
-        logger.info('settype=%s loaded, size=%d' % (self.settype, len(self.index)))
+        logger.debug('settype=%s loaded, size=%d' % (self.settype, len(self.index)))
 
         # filter out datas without gt / gsd info.
-        self.index = list(filter(lambda i: self.dota.gsd(self.dota.imglist[i]) > 0, self.index))
-        self.index = list(filter(lambda i: len(self.dota.ImgToAnns[self.dota.imglist[i]]) > 0, self.index))
-        logger.info('settype=%s filtered, size=%d' % (self.settype, len(self.index)))
+        if 'train' in self.settype:
+            self.index = list(filter(lambda i: self.dota.gsd(self.dota.imglist[i]) > 0, self.index))
+        if self.settype != 'test':
+            self.index = list(filter(lambda i: len(self.dota.ImgToAnns[self.dota.imglist[i]]) > 0, self.index))
+
+        logger.debug('settype=%s filtered, size=%d' % (self.settype, len(self.index)))
         assert len(self.index) > 0
 
         # oversampling
@@ -104,7 +116,7 @@ class DotaDataset(Dataset):
                 over_index.extend([id] * max_ratio)
             random.shuffle(over_index)
             self.index = over_index
-            logger.info('oversampled, size=%d' % len(self.index))
+            logger.debug('oversampled, size=%d' % len(self.index))
         assert len(self.index) > 0
 
         # transforms
@@ -123,14 +135,16 @@ class DotaDataset(Dataset):
         self.gsd_aug = GSDNormalizedCrop(
             crop_size=(_size, _size),
             random_crop=(not self.test_mode),
-            target_gsd=_target_gsd
+            target_gsd=self.target_gsd
         )  # TODO : parameters
 
         # if use extra augmentation
         self.random_rot = RandomRotation()
         if extra_aug is not None:
+            print('extra augmentation loading...')
             self.extra_aug = ExtraAugmentation(**extra_aug)
         else:
+            print('no extra augmentation...')
             self.extra_aug = None
 
         # image rescale if keep ratio
@@ -154,6 +168,9 @@ class DotaDataset(Dataset):
     def get_ann_info(self, index):
         imgid = self.dota.imglist[self.index[index]]
         anns = self.dota.loadAnns(imgId=imgid)
+
+        if self.settype == 'train_cc':
+            anns = [x for x in anns if x['name'] == 'container-crane']
 
         gt_bboxes = np.array([dots4ToRec4(ann['poly']) for ann in anns], dtype=np.int)
         gt_labels = np.array([wordname_16.index(ann['name']) + 1 for ann in anns], dtype=np.int)    # bg : 0
@@ -220,30 +237,44 @@ class DotaDataset(Dataset):
         else:
             imgs = []
             img_metas = []
-            for gsd_idx in range(len(_target_gsd)):
-                img_g, gt_bboxes_g, gt_labels_g, gsd_scale_g = self.gsd_aug(img, gt_bboxes, gt_labels, gsd, gsd_idx, -1)
+            if not isinstance(gsd, list):
+                gsd = [gsd]
+            # if any([x > 1.5 for x in gsd]):
+            #     gsd.extend([3.0])
+            processed_gsd = []
+            for curr_gsd in gsd:
+                skip = False
+                for prev_gsd in processed_gsd:
+                    if abs(curr_gsd - prev_gsd) < 0.1 or max(curr_gsd / prev_gsd, prev_gsd / curr_gsd) < 1.4:
+                        skip = True
+                if skip:
+                    continue
 
-                # 각 window마다 매번 normalize하는게 느려서 따로 처리하도록 함
-                img_g = mmcv.imnormalize(img_g, self.img_norm_cfg['mean'], self.img_norm_cfg['std'], True)
+                for gsd_idx in range(len(_target_gsd)):
+                    img_g, gt_bboxes_g, gt_labels_g, gsd_scale_g = self.gsd_aug(img, gt_bboxes, gt_labels, curr_gsd, gsd_idx, -1)
 
-                # sliding window
-                windows = sw.generate(img_g, sw.DimOrder.HeightWidthChannel, _size, _overlap[gsd_idx])
-                for window in windows:
-                    _img_w = img_g[window.indices()]
+                    # 각 window마다 매번 normalize하는게 느려서 따로 처리하도록 함
+                    img_g = mmcv.imnormalize(img_g, self.img_norm_cfg['mean'], self.img_norm_cfg['std'], True)
 
-                    for flip_h in [False]:
-                        _img, _img_shape, _pad_shape, _scale_factor = self.img_transform(_img_w, self.img_scales[0], flip_h, keep_ratio=self.resize_keep_ratio)
-                        # _gt_bboxes = self.bbox_transform(gt_bboxes_g, _img_shape, _scale_factor, flip_h)
+                    # sliding window
+                    windows = sw.generate(img_g, sw.DimOrder.HeightWidthChannel, _size, _overlap[gsd_idx])
+                    for window in windows:
+                        _img_w = img_g[window.indices()]
 
-                        imgs.append(to_tensor(_img))
-                        img_metas.append(DC(dict(
-                            ori_shape=ori_shape,
-                            img_shape=(_img.shape[1], _img.shape[2], 3),
-                            pad_shape=(_img.shape[1], _img.shape[2], 3),
-                            translation=(window.x, window.y),
-                            scale_factor=_scale_factor * gsd_scale_g,
-                            flip=flip_h
-                        ), cpu_only=True))
+                        for flip_h in [False]:
+                            _img, _img_shape, _pad_shape, _scale_factor = self.img_transform(_img_w, self.img_scales[0], flip_h, keep_ratio=self.resize_keep_ratio)
+                            # _gt_bboxes = self.bbox_transform(gt_bboxes_g, _img_shape, _scale_factor, flip_h)
+
+                            imgs.append(to_tensor(_img))
+                            img_metas.append(DC(dict(
+                                ori_shape=ori_shape,
+                                img_shape=(_img.shape[1], _img.shape[2], 3),
+                                pad_shape=(_img.shape[1], _img.shape[2], 3),
+                                translation=(window.x, window.y),
+                                scale_factor=_scale_factor * gsd_scale_g,
+                                flip=flip_h
+                            ), cpu_only=True))
+                processed_gsd.append(curr_gsd)
 
             data = dict(img=imgs, img_meta=img_metas)
             return data

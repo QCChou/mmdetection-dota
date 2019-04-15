@@ -46,7 +46,12 @@ class DOTA:
             if not load_all and self.ImgToGsd.get(key, -1) > 0:
                 continue
             self.ImgToGsd[key] = gsd_estimated[key]['prediction']
-            print('gsd for %s loaded. %.4f' % (key, self.ImgToGsd[key]))
+            if isinstance(gsd_estimated[key]['prediction'], list):
+                for x in gsd_estimated[key]['prediction']:
+                    assert x > 0.
+            else:
+                assert gsd_estimated[key]['prediction'] > 0.
+            # print('gsd for %s loaded. %.4f' % (key, self.ImgToGsd[key]))
 
     def getImgIds(self, catNms=[]):
         """

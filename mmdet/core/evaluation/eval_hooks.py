@@ -74,12 +74,15 @@ class DistEvalHook(Hook):
         results = [None for _ in range(len(self.dataset))]
         prog_bar = mmcv.ProgressBar(len(self.dataset))
         for idx in range(runner.rank, len(self.dataset), runner.world_size):
+            batch_size = runner.world_size
             imgid = self.dataset.get_id(idx)
             cache_path = os.path.join(self.debug_root, 'dump_%s.pkl' % imgid)
 
             if os.path.exists(cache_path):
                 result = mmcv.load(cache_path)
                 results[idx] = result
+                for _ in range(batch_size):
+                    prog_bar.update()
                 continue
             data = self.dataset[idx]
 
@@ -104,7 +107,6 @@ class DistEvalHook(Hook):
             show_result(img, result, dataset='dota', score_thr=0.01, out_file=os.path.join(self.debug_root, 'vis_%s.jpg' % imgid))
             results[idx] = result
 
-            batch_size = runner.world_size
             for _ in range(batch_size):
                 prog_bar.update()
 

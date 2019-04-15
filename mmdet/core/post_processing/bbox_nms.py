@@ -21,12 +21,15 @@ def multiclass_nms(multi_bboxes, multi_scores, score_thr, nms_cfg, max_num=-1):
     """
     num_classes = multi_scores.shape[1]
     bboxes, labels = [], []
+    only_cc = nms_cfg.pop('cc', 0)
     nms_cfg_ = nms_cfg.copy()
     nms_type = nms_cfg_.pop('type', 'nms')
     nms_op = getattr(nms_wrapper, nms_type)
     for i in range(1, num_classes):
         if isinstance(nms_cfg['iou_thr'], (list, tuple)):
             nms_cfg_['iou_thr'] = nms_cfg['iou_thr'][i - 1]
+        if only_cc and i != num_classes - 1:
+            continue
         cls_inds = multi_scores[:, i] > score_thr
         if not cls_inds.any():
             continue
@@ -38,7 +41,6 @@ def multiclass_nms(multi_bboxes, multi_scores, score_thr, nms_cfg, max_num=-1):
         _scores = multi_scores[cls_inds, i]
         assert _scores.min() > score_thr, _scores.min()
         cls_dets = torch.cat([_bboxes, _scores[:, None]], dim=1)
-        cls_dets, _ = nms_op(cls_dets, **nms_cfg_)
         cls_dets, _ = nms_op(cls_dets, **nms_cfg_)
         cls_labels = multi_bboxes.new_full((cls_dets.shape[0], ), i - 1, dtype=torch.long)
         bboxes.append(cls_dets)

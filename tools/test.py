@@ -1,7 +1,4 @@
 import argparse
-import logging
-import os
-from collections import defaultdict
 
 import torch
 import mmcv

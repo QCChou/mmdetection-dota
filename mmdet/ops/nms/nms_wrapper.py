@@ -17,9 +17,7 @@ def nms(dets, iou_thr, device_id=None):
         is_tensor = False
         dets_np = dets
     else:
-        raise TypeError(
-            'dets must be either a Tensor or numpy array, but got {}'.format(
-                type(dets)))
+        raise TypeError('dets must be either a Tensor or numpy array, but got {}'.format(type(dets)))
 
     if dets_np.shape[0] == 0:
         inds = []
@@ -27,7 +25,9 @@ def nms(dets, iou_thr, device_id=None):
         inds = (gpu_nms(dets_np, iou_thr, device_id=device_id) if device_id is not None else cpu_nms(dets_np, iou_thr))
 
     if is_tensor:
-        inds = torch.tensor(inds, dtype=torch.long, device=device_id, requires_grad=False)
+        inds = torch.tensor(inds, dtype=torch.long, requires_grad=False)
+        if device_id is not None:
+            inds = inds.cuda()
     else:
         inds = np.array(inds, dtype=np.int64)
     return dets[inds, :], inds

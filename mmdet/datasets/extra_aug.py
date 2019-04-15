@@ -2,6 +2,7 @@ import mmcv
 import numpy as np
 from numpy import random
 
+from imgaug import augmenters as iaa
 from mmdet.core.evaluation.bbox_overlaps import bbox_overlaps
 
 
@@ -16,8 +17,13 @@ class PhotoMetricDistortion(object):
         self.contrast_lower, self.contrast_upper = contrast_range
         self.saturation_lower, self.saturation_upper = saturation_range
         self.hue_delta = hue_delta
+        self.gray = iaa.Grayscale(alpha=(0.0, 1.0))
 
     def __call__(self, img, boxes, labels):
+        if random.randint(2):
+            img = self.gray.augment_image(img.astype(np.uint8))
+            img = img.astype(np.float32)
+
         # random brightness
         if random.randint(2):
             delta = random.uniform(-self.brightness_delta,

@@ -140,12 +140,12 @@ test_cfg = dict(
         nms_across_levels=False,
         nms_pre=2000,
         nms_post=2000,
-        max_num=1000,
-        nms_thr=0.7,
+        max_num=1500,
+        nms_thr=0.75,
         min_bbox_size=0),
     rcnn=dict(
         score_thr=0.1,
-        nms=dict(type='soft_nms', iou_thr=0.7),
+        nms=dict(type='soft_nms', iou_thr=0.75, cc=1),
         max_per_img=10000
     ),
     keep_all_stages=False)
@@ -159,13 +159,21 @@ data = dict(
     workers_per_gpu=4,
     train=dict(
         type='DotaDataset',
-        settype='cv_train',
+        settype='train_cc',
         img_scale=img_scale,
         img_norm_cfg=img_norm_cfg,
         size_divisor=img_size_divisor,
         flip_ratio=0.5,
         with_label=True,
-        test_mode=False),
+        test_mode=False,
+        extra_aug=dict(
+            photo_metric_distortion=dict(
+                brightness_delta=32,
+                contrast_range=(0.5, 1.5),
+                saturation_range=(0.5, 1.5),
+                hue_delta=18
+            )),
+    ),
     val=dict(
         type='DotaDataset',
         settype='cv_valid',
@@ -184,7 +192,7 @@ data = dict(
         test_mode=True))
 
 # optimizer
-optimizer = dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001)
 optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
 # learning policy
 lr_config = dict(
@@ -192,7 +200,7 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=700,
     warmup_ratio=1.0 / 3,
-    step=[200, 300, 400])
+    step=[150, 170, 200, 230])
 checkpoint_config = dict(interval=20)
 # yapf:disable
 log_config = dict(
@@ -203,10 +211,10 @@ log_config = dict(
     ])
 # yapf:enable
 # runtime settings
-total_epochs = 500
+total_epochs = 250
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/cascade_rcnn_dconv_c3-c5_r50_fpn_1x'
+work_dir = './work_dirs/crcnn_cc/full'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]

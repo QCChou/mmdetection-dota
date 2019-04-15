@@ -38,7 +38,15 @@ class BaseDetector(nn.Module):
     def extract_feats(self, imgs):
         assert isinstance(imgs, list)
         for img in imgs:
-            yield self.extract_feat(img)
+            if not img.is_cuda:
+                img = img.cuda(torch.cuda.current_device())
+                created = True
+            else:
+                created = False
+            feat = self.extract_feat(img)
+            if created:
+                del img
+            yield feat
 
     @abstractmethod
     def forward_train(self, imgs, img_metas, **kwargs):
@@ -68,17 +76,31 @@ class BaseDetector(nn.Module):
 
             l1.append(det_bboxes)
             l2.append(det_scores)
-        merged_bboxes = torch.cat(l1, dim=0)
-        merged_scores = torch.cat(l2, dim=0)
+
+        if len(l1) > 0:
+            merged_bboxes = torch.cat(l1, dim=0)
+            merged_scores = torch.cat(l2, dim=0)
+        else:
+            merged_bboxes = torch.zeros((0, 4), dtype=torch.float32).cuda()
+            merged_scores = torch.zeros((0, 1), dtype=torch.float32).cuda()
         assert merged_scores.max() <= 1.
 
+        if hasattr(self.test_cfg, 'rcnn'):
+            _score_thr = self.test_cfg.rcnn.score_thr
+            _max_per_img = self.test_cfg.rcnn.max_per_img
+            _nms = self.test_cfg.rcnn.nms
+        else:
+            _score_thr = self.test_cfg.score_thr
+            _max_per_img = self.test_cfg.max_per_img
+            _nms = self.test_cfg.nms
+
         merged_bboxes, merged_labels = multiclass_nms(
-            merged_bboxes, merged_scores, self.test_cfg.rcnn.score_thr,
-            self.test_cfg.rcnn.nms, self.test_cfg.rcnn.max_per_img
+            merged_bboxes, merged_scores, _score_thr,
+            _nms, _max_per_img
         )
 
         # threshold
-        inds = merged_bboxes[:, -1] > self.test_cfg.rcnn.score_thr
+        inds = merged_bboxes[:, -1] > _score_thr
         merged_bboxes = merged_bboxes[inds, :]
         det_labels = merged_labels[inds]
 
@@ -98,7 +120,8 @@ class BaseDetector(nn.Module):
         _det_bboxes = det_bboxes[valid_idx, :]
         det_labels = det_labels[valid_idx]
 
-        bbox_results = bbox2result(_det_bboxes, det_labels, self.bbox_head[0].num_classes)  # list # = class_num
+        bbox_head = self.bbox_head[0] if isinstance(self.bbox_head, (list, nn.ModuleList)) else self.bbox_head
+        bbox_results = bbox2result(_det_bboxes, det_labels, bbox_head.num_classes)  # list # = class_num
 
         # det_bboxes always keep the original scale
         if self.with_mask:
